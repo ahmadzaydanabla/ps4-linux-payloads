@@ -2,7 +2,7 @@
 # linux/Makefile — AIO-only PS4 Linux payload build system
 #
 # All legacy per-firmware targets (FIRMWARES / fwXXX/) have been removed.
-# The sole shipped build product is the AIO payload family in the aio/
+# The sole shipped build product is the payload family in the payloads/
 # directory. Shared kexec sources are built into kexec-build/.
 #
 # Supported VRAM sizes (MB):
@@ -51,7 +51,7 @@ LDFLAGS = -Wl,-gc-sections
 KEXEC_BINS = $(foreach fw,$(FIRMWARES),$(KEXEC_BUILD_DIR)/$(fw)/kexec.bin)
 # ── AIO target list ───────────────────────────────────────────────────────────
 
-AIO_TARGETS = $(foreach sz,$(SIZES_MB), aio/payload-aio-$(sz)mb.bin)
+AIO_TARGETS = $(foreach sz,$(SIZES_MB), payloads/linux-$(sz)mb.bin)
 
 # ── Top-level phony targets ───────────────────────────────────────────────────
 
@@ -87,8 +87,8 @@ $(KEXEC_BUILD_DIR)/%/kexec.bin:
 	    -O binary $@
 
 define make-aio-rules
-aio/payload-aio-$(1)mb.elf: ../lib/lib.a main-aio.c fw_detect.c $(KEXEC_BINS)
-	@mkdir -p aio
+payloads/linux-$(1)mb.elf: ../lib/lib.a main-aio.c fw_detect.c $(KEXEC_BINS)
+	@mkdir -p payloads
 	$(CC) $(CFLAGS) ../lib/lib.a \
 	    -DVRAM_MB_DEFAULT=$(1) \
 	    -DVRAM_MB_MIN=32 \
@@ -106,5 +106,5 @@ $(foreach sz,$(SIZES_MB),$(eval $(call make-aio-rules,$(sz))))
 # ── Clean ─────────────────────────────────────────────────────────────────────
 
 clean:
-	rm -rf aio/ $(KEXEC_BUILD_DIR)/
+	rm -rf payloads/ $(KEXEC_BUILD_DIR)/
 	cd ../lib/ && $(MAKE) clean
