@@ -161,6 +161,24 @@ u16 normalize_fw_ver(u16 raw_fw)
         case 701:
         case 702:
             return 700;
+        case 751:
+        case 755:
+            return 750;
+        case 801:
+        case 803:
+            return 800;
+        case 852:
+            return 850;
+        case 904:
+            return 903;
+        case 950:
+        case 951:
+            return 960;
+        case 1001:
+            return 1000;
+        case 1070:
+        case 1071:
+            return 1050;
         case 1152:
             return 1150;
         case 1202:

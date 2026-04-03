@@ -247,6 +247,7 @@
 #define kern_off_pstate_before_shutdown 0x29A970
 #define kern_off_set_nclk_mem_spd 0
 
+// 9.03 & 9.04
 #elif defined PS4_9_03 //mircoho
 #define kern_off_printf 0x0B79E0
 #define kern_off_snprintf 0x0B7CE0
@@ -282,6 +283,7 @@
 #define kern_off_pstate_before_shutdown 0x29A5F0
 #define kern_off_set_nclk_mem_spd 0
 
+// 9.50 & 9.51 & 9.60
 #elif defined PS4_9_60 //Eintim23
 #define kern_off_printf	0x205470
 #define kern_off_snprintf 0x205770
@@ -317,6 +319,7 @@
 #define kern_off_pstate_before_shutdown 0x3323E0
 #define kern_off_set_nclk_mem_spd 0x3791A0
 
+// 10.00 & 10.01
 #elif defined PS4_10_00 //EinTim23
 #define kern_off_printf	0xC50F0
 #define kern_off_snprintf 0xC53F0
@@ -352,6 +355,7 @@
 #define kern_off_pstate_before_shutdown 0x4812d0
 #define kern_off_set_nclk_mem_spd 0
 
+// 10.70 & 10.71
 #elif defined PS4_10_50 //EchoStretch
 #define kern_off_printf 0x00450e80
 #define kern_off_snprintf 0x00451180
