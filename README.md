@@ -50,7 +50,7 @@ Control VRAM size via a plain text file containing a number in **MB** (not GB).
 |:-:|:-:|
 | `32`  | 32 MB
 | `64`  | 64 MB
-| `128` | 128 MM
+| `128` | 128 MB
 | `256` | 256 MB
 | `512` | 512 MB
 | `1024` | 1 GB
