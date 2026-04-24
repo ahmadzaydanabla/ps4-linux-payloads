@@ -143,6 +143,38 @@ static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
          | ((u32)vclk_ret & 0x3f);
 }
 
+static void apply_final_gpu_clocks(void)
+{
+    /*
+     * sys_kexec applies this before Linux is copied, but the late GPU reset in
+     * this file can undo parts of it. Re-apply the full sequence before probing
+     * UVD-specific clocks so DCLK/VCLK see the same dependencies Sony expects.
+     */
+    if (kern.gpu_devid_is_9924()) {
+        kern.set_gpu_freq(1, 853);
+        kern.set_gpu_freq(2, 711);
+        kern.set_gpu_freq(4, 911);
+        kern.set_gpu_freq(5, 800);
+        kern.set_gpu_freq(6, 984);
+        kern.set_cu_power_gate(0x24);
+    } else {
+        kern.set_pstate(3);
+        kern.set_gpu_freq(0, 800);
+        kern.set_gpu_freq(1, 673);
+        kern.set_gpu_freq(2, 609);
+        kern.set_gpu_freq(4, 800);
+        kern.set_gpu_freq(5, 711);
+        kern.set_gpu_freq(6, 711);
+        kern.set_cu_power_gate(0x12);
+    }
+
+    kern.set_pstate(3);
+    kern.set_gpu_freq(0, 800);
+    kern.set_gpu_freq(3, 800);
+    kern.set_gpu_freq(7, 673);
+    kern.update_vddnp(0x12);
+}
+
 static void configure_vram(void)
 {
     u64 mmio_base = GPU_MMIO_BASE;
@@ -455,6 +487,8 @@ static void cpu_quiesce_gate(void *arg)
     *(volatile u64 *)PA_TO_DM(0xe4805e1c) = 0x500000f0;
     *(volatile u64 *)PA_TO_DM(0xe4805e30) = 0x156;
     *(volatile u64 *)PA_TO_DM(0xe4805e34) = 0x014510f0;
+
+    apply_final_gpu_clocks();
 
     /*
      * The GPU reset above can undo earlier kexec clock requests. Probe Sony's
