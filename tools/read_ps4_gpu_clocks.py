@@ -26,6 +26,7 @@ SMC_IND_INDEX_0 = 0x0080
 SMC_IND_DATA_0 = 0x0081
 
 PS4_UVD_CLOCK_MAGIC = 0x55564432
+PS4_UVD_PROBE_MAGIC = 0x55564450
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,10 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_CTRL", 0x3D65),
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
+    MmioReg("BIOS_SCRATCH_10", 0x05D3, "kexec UVD probe marker"),
+    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec UVD probe 673/711"),
+    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec UVD probe 800/800"),
+    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec UVD probe 853/984"),
     MmioReg("BIOS_SCRATCH_14", 0x05D7, "kexec UVD clock marker"),
     MmioReg("BIOS_SCRATCH_15", 0x05D8, "kexec DCLK/VCLK return codes"),
 ]
@@ -145,6 +150,11 @@ def signed16(value: int) -> int:
     return value - 0x10000 if value & 0x8000 else value
 
 
+def signed6(value: int) -> int:
+    value &= 0x3F
+    return value - 0x40 if value & 0x20 else value
+
+
 def decode_clock_value(value: int, spll_mhz: float) -> dict:
     div = value & 0x7F
     dir_en = bool(value & 0x100)
@@ -191,6 +201,43 @@ def decode_kexec_scratch(mmio_values: dict) -> dict:
     }
 
 
+def decode_probe_word(value: int) -> dict:
+    return {
+        "dclk": (value >> 22) & 0x3FF,
+        "vclk": (value >> 12) & 0x3FF,
+        "dclk_ret": signed6(value >> 6),
+        "vclk_ret": signed6(value),
+        "raw": value,
+    }
+
+
+def decode_kexec_probes(mmio_values: dict) -> dict:
+    marker = mmio_values.get("BIOS_SCRATCH_10")
+    if marker is None:
+        return {}
+
+    probe_regs = [
+        ("base", "BIOS_SCRATCH_11"),
+        ("mid", "BIOS_SCRATCH_12"),
+        ("high", "BIOS_SCRATCH_13"),
+    ]
+    probes = []
+    for label, name in probe_regs:
+        raw = mmio_values.get(name)
+        if raw is None:
+            continue
+        probe = decode_probe_word(raw)
+        probe["label"] = label
+        probe["accepted"] = probe["dclk_ret"] == 0 and probe["vclk_ret"] == 0
+        probes.append(probe)
+
+    return {
+        "marker": marker,
+        "marker_ok": marker == PS4_UVD_PROBE_MAGIC,
+        "probes": probes,
+    }
+
+
 def collect(device: str, bar: int, spll_mhz: float, no_smc: bool) -> dict:
     bars = read_resource_table(device)
     path = resource_path(device, bar)
@@ -219,6 +266,7 @@ def collect(device: str, bar: int, spll_mhz: float, no_smc: bool) -> dict:
         "mmio": mmio,
         "smc": smc,
         "kexec": decode_kexec_scratch(mmio),
+        "probes": decode_kexec_probes(mmio),
         "spll_mhz": spll_mhz,
     }
 
@@ -236,6 +284,24 @@ def print_report(result: dict) -> None:
         print(f"  [{entry.reg:#06x}] {entry.name:<24} = 0x{value:08X}{suffix}")
     print()
 
+    probes = result["probes"]
+    print("=== Kexec UVD Clock Probe Table ===")
+    if not probes:
+        print("  No probe registers found.")
+    else:
+        print(f"  marker     = 0x{probes['marker']:08X} ({'OK' if probes['marker_ok'] else 'missing/stale'})")
+        if probes["marker_ok"]:
+            for probe in probes["probes"]:
+                verdict = "accepted" if probe["accepted"] else "rejected"
+                print(
+                    f"  {probe['label']:<5}     = DCLK={probe['dclk']:>3} ret={probe['dclk_ret']:>2} "
+                    f"VCLK={probe['vclk']:>3} ret={probe['vclk_ret']:>2} -> {verdict} "
+                    f"(raw=0x{probe['raw']:08X})"
+                )
+        else:
+            print("  result     = Probe marker missing or stale; boot a payload with probe support.")
+    print()
+
     kexec = result["kexec"]
     print("=== Kexec UVD Clock Request Marker ===")
     if not kexec:
@@ -247,7 +313,7 @@ def print_report(result: dict) -> None:
         if kexec["marker_ok"] and kexec["dclk_ret"] == 0 and kexec["vclk_ret"] == 0:
             print("  result     = Sony accepted both final clock requests.")
         elif kexec["marker_ok"]:
-            print("  result     = At least one final clock request failed.")
+            print("  result     = At least one final set_gpu_freq call returned failure.")
     print()
 
     smc = result["smc"]
@@ -273,7 +339,8 @@ def print_report(result: dict) -> None:
     print("=== Notes ===")
     print("  CG_DCLK_STATUS is 0xC05000A0; it is not ECLK control.")
     print("  CG_ECLK_CNTL is 0xC05000AC.")
-    print("  Low DCLK/VCLK control dividers after marker ret=0 means Sony accepted the request but did not change these control regs.")
+    print("  kexec ret=0 means Sony's set_gpu_freq path accepted that clock request.")
+    print("  kexec ret=1 on DCLK/VCLK means Sony's helper returned failure for that path.")
 
 
 def main() -> None:
