@@ -21,6 +21,7 @@ from pathlib import Path
 DEFAULT_DEVICE = "0000:00:01.0"
 DEFAULT_BAR = 5
 DEFAULT_SPLL_MHZ = 800.0
+TOOL_VERSION = "2026-04-24.2"
 
 SMC_IND_INDEX_0 = 0x0080
 SMC_IND_DATA_0 = 0x0081
@@ -321,9 +322,13 @@ def print_report(result: dict) -> None:
         print("=== SMC Indirect Clock Register Reads ===")
         for entry in SMC_REGS:
             value = smc[entry.name]
-            detail = format_clock(value, result["spll_mhz"]) if entry.kind in ("clock", "pll", "status") else ""
-            notes = f"  {entry.notes}" if entry.notes else ""
-            print(f"  [{entry.addr:#010x}] {entry.name:<24} = 0x{value:08X}  {detail}{notes}")
+            detail = ""
+            if entry.kind in ("clock", "pll", "status"):
+                detail = format_clock(value, result["spll_mhz"])
+            note_text = ""
+            if entry.notes:
+                note_text = f"  {entry.notes}"
+            print(f"  [{entry.addr:#010x}] {entry.name:<24} = 0x{value:08X}  {detail}{note_text}")
         print()
 
         dclk = decode_clock_value(smc["CG_DCLK_CNTL"], result["spll_mhz"])
@@ -345,6 +350,7 @@ def print_report(result: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Read PS4 Liverpool/Gladius GPU UVD clock diagnostics.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {TOOL_VERSION}")
     parser.add_argument("--device", default=DEFAULT_DEVICE, help=f"PCI device id, default {DEFAULT_DEVICE}")
     parser.add_argument("--bar", type=int, default=DEFAULT_BAR, help=f"resource BAR number, default {DEFAULT_BAR}")
     parser.add_argument("--spll-mhz", type=float, default=DEFAULT_SPLL_MHZ, help=f"assumed SPLL MHz, default {DEFAULT_SPLL_MHZ}")
