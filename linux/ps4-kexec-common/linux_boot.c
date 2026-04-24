@@ -120,9 +120,19 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define HDP_NONSURFACE_BASE 0x2c04
 #define CONFIG_MEMSIZE 0x5428
 
+#define GPU_MMIO_BASE 0xe4800000
+#define BIOS_SCRATCH_14 0x5d7
+#define BIOS_SCRATCH_15 0x5d8
+#define PS4_UVD_CLOCK_MAGIC 0x55564432
+
+static void write_gpu_reg(u32 reg, u32 value)
+{
+    WR32(GPU_MMIO_BASE + reg * 4, value);
+}
+
 static void configure_vram(void)
 {
-    u64 mmio_base = 0xe4800000;
+    u64 mmio_base = GPU_MMIO_BASE;
     u64 fb_base = 0x0f00000000;
     u64 fb_top = fb_base + vram_mb * vram_size - 1;
 
@@ -432,6 +442,19 @@ static void cpu_quiesce_gate(void *arg)
     *(volatile u64 *)PA_TO_DM(0xe4805e1c) = 0x500000f0;
     *(volatile u64 *)PA_TO_DM(0xe4805e30) = 0x156;
     *(volatile u64 *)PA_TO_DM(0xe4805e34) = 0x014510f0;
+
+    /*
+     * The GPU reset above can undo earlier kexec clock requests. Make the
+     * UVD video clock requests last, and expose the return codes through
+     * BIOS scratch registers so Linux-side MMIO tools can read them.
+     */
+    int dclk_ret = kern.set_gpu_freq(1, 853);
+    int vclk_ret = kern.set_gpu_freq(6, 984);
+    write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
+    write_gpu_reg(BIOS_SCRATCH_15,
+        ((u32)dclk_ret & 0xffff) << 16 | ((u32)vclk_ret & 0xffff));
+    kern.printf("kexec: final UVD clocks DCLK=853 ret=%d VCLK=984 ret=%d\n",
+        dclk_ret, vclk_ret);
 
     uart_write_str("kexec: About to relocate and jump to kernel\n");
 

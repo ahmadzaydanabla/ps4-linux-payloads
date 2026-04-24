@@ -163,18 +163,6 @@ int sys_kexec(void *td, struct sys_kexec_args *uap)
     kern.set_gpu_freq(7, 673); //673 //673
     kern.update_vddnp(0x12);
 
-    /*
-     * set_pstate() reapplies Sony's clock table and can undo video clocks.
-     * Re-apply Sony's highest known DCLK/VCLK requests last so Linux inherits
-     * routed UVD clocks instead of the low idle divider state.
-     */
-    {
-        int dclk_ret = kern.set_gpu_freq(1, 853);
-        int vclk_ret = kern.set_gpu_freq(6, 984);
-        kern.printf("kexec: final UVD clocks DCLK=853 ret=%d VCLK=984 ret=%d\n",
-            dclk_ret, vclk_ret);
-    }
-
     // Copy in kernel image
     image = kernel_alloc_contig(uap->image_size);
     if (!image) {
