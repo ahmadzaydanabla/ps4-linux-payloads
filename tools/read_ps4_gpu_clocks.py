@@ -60,9 +60,9 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
     MmioReg("BIOS_SCRATCH_10", 0x05D3, "kexec UVD probe marker"),
-    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec Sony domain 1/6 probe"),
-    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec Sony domain 2/5 probe"),
-    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec Sony domain 3/7 probe"),
+    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec DCLK range 38/50 probe"),
+    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec DCLK range 100/200 probe"),
+    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec DCLK range 400/673 probe"),
     MmioReg("BIOS_SCRATCH_14", 0x05D7, "kexec UVD clock marker"),
     MmioReg("BIOS_SCRATCH_15", 0x05D8, "kexec DCLK/VCLK return codes"),
 ]
@@ -218,9 +218,9 @@ def decode_kexec_probes(mmio_values: dict) -> dict:
         return {}
 
     probe_regs = [
-        ("domain-1-6", "BIOS_SCRATCH_11"),
-        ("domain-2-5", "BIOS_SCRATCH_12"),
-        ("domain-3-7", "BIOS_SCRATCH_13"),
+        ("dclk-38-50", "BIOS_SCRATCH_11"),
+        ("dclk-100-200", "BIOS_SCRATCH_12"),
+        ("dclk-400-673", "BIOS_SCRATCH_13"),
     ]
     probes = []
     for label, name in probe_regs:
@@ -294,11 +294,18 @@ def print_report(result: dict) -> None:
         if probes["marker_ok"]:
             for probe in probes["probes"]:
                 verdict = "accepted" if probe["accepted"] else "rejected"
-                print(
-                    f"  {probe['label']:<11} = DCLK={probe['dclk']:>3} ret={probe['dclk_ret']:>2} "
-                    f"VCLK={probe['vclk']:>3} ret={probe['vclk_ret']:>2} -> {verdict} "
-                    f"(raw=0x{probe['raw']:08X})"
-                )
+                if probe["label"].startswith("dclk-"):
+                    print(
+                        f"  {probe['label']:<12} = DCLK_A={probe['dclk']:>3} ret={probe['dclk_ret']:>2} "
+                        f"DCLK_B={probe['vclk']:>3} ret={probe['vclk_ret']:>2} -> {verdict} "
+                        f"(raw=0x{probe['raw']:08X})"
+                    )
+                else:
+                    print(
+                        f"  {probe['label']:<12} = DCLK={probe['dclk']:>3} ret={probe['dclk_ret']:>2} "
+                        f"VCLK={probe['vclk']:>3} ret={probe['vclk_ret']:>2} -> {verdict} "
+                        f"(raw=0x{probe['raw']:08X})"
+                    )
         else:
             print("  result     = Probe marker missing or stale; boot a payload with probe support.")
     print()

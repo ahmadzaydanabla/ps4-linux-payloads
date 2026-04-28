@@ -238,6 +238,22 @@ Interpretation:
 - Do not keep finalizing with the direct write path because it produces final `-13` for both clocks.
 - Next patch should restore final clock application through `set_gpu_freq` and probe other Sony clock domains instead.
 
+Latest result from commit `3b77656 Probe Sony clock domains for UVD`:
+
+```text
+domain-1-6 = DCLK=673 ret=1 VCLK=711 ret=0
+domain-2-5 = DCLK=609 ret=0 VCLK=711 ret=0
+domain-3-7 = DCLK=800 ret=0 VCLK=673 ret=0
+final      = DCLK ret=1 VCLK ret=0
+post-boot  = CG_DCLK_CNTL DIV 21 (~38 MHz), CG_VCLK_CNTL DIV 19 (~42 MHz)
+```
+
+Interpretation:
+
+- Domains 2/5 and 3/7 accept requests, but they do not move the UVD DCLK/VCLK control registers after Linux boots.
+- The only known failing Sony domain that matters for UVD decode clock control is still domain 1.
+- The next patch should probe domain 1 across low-to-high DCLK values. If even 38/50 MHz fail, the issue is a DCLK domain state/permission precondition, not just the 673 MHz target.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -330,10 +346,11 @@ Reason:
 - Notes also say `CGC_CTRL=0`, `CGC_CTRL=0x18c`, and `CGC_GATE=0` read back correctly.
 - If Sony's DCLK helper rejects because UVD is gated/reset, one of these profiles should let base DCLK return `0`.
 - Direct mediated read/write and write-only attempts returned `-13`, so the direct helper path is no longer the current test.
-- Current probe should check whether adjacent Sony clock domains affect post-boot DCLK/VCLK:
-  - domain 1/6: known DCLK/VCLK pair
-  - domain 2/5: stock kexec-adjacent domains
-  - domain 3/7: stock common domains
+- Adjacent Sony domains 2/5 and 3/7 accept but do not change UVD DCLK/VCLK control regs, so they are not the missing direct UVD clock path.
+- Current probe checks whether domain 1 rejects every DCLK target or only high targets:
+  - scratch11: DCLK 38/50 MHz
+  - scratch12: DCLK 100/200 MHz
+  - scratch13: DCLK 400/673 MHz
 
 ## Current Theory
 
@@ -364,11 +381,10 @@ sudo python3 read_ps4_gpu_clockss.py
 Primary success line:
 
 ```text
-cgc0-base or cgc18c-base = DCLK=673 ret=0 VCLK=711 ret=0
-or any domain-pair probe changes post-boot `CG_DCLK_CNTL` away from DIV 21
+dclk-38-50 or dclk-100-200 or dclk-400-673 has ret=0
 ```
 
-If that happens, UVD gate/reset state was the DCLK precondition and the next job is to confirm actual `CG_DCLK_CNTL`/`CG_VCLK_CNTL` values changed from the ~40 MHz dividers.
+If that happens, DCLK domain 1 is frequency/range/table sensitive. If every DCLK target still returns `1`, domain 1 is blocked by a missing state/permission precondition.
 
 ## If DCLK Still Returns 1
 

@@ -506,9 +506,9 @@ static void cpu_quiesce_gate(void *arg)
     apply_final_gpu_clocks();
 
     /*
-     * Probe Sony clock domains that are applied around UVD setup. Domain 1 is
-     * DCLK and domain 6 is VCLK, but domains 2/5 are also part of Sony's stock
-     * ladder and may be DCLK prerequisites.
+     * Probe domain-1 DCLK across a range. Adjacent Sony domains accept requests
+     * but do not move UVD DCLK/VCLK control regs, so the next question is
+     * whether domain 1 rejects all requests or only the stock high target.
      */
     int ret_a = 1;
     int ret_b = 1;
@@ -516,27 +516,27 @@ static void cpu_quiesce_gate(void *arg)
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
 
     apply_uvd_clock_precondition(0, 0);
-    ret_a = kern.set_gpu_freq(1, 673);
-    ret_b = kern.set_gpu_freq(6, 711);
+    ret_a = kern.set_gpu_freq(1, 38);
+    ret_b = kern.set_gpu_freq(1, 50);
     write_gpu_reg(BIOS_SCRATCH_11,
-        encode_uvd_probe(673, 711, ret_a, ret_b));
-    kern.printf("kexec: UVD domain 1/6 base d1=673 ret=%d d6=711 ret=%d\n",
+        encode_uvd_probe(38, 50, ret_a, ret_b));
+    kern.printf("kexec: UVD DCLK range d1=38 ret=%d d1=50 ret=%d\n",
         ret_a, ret_b);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    ret_a = kern.set_gpu_freq(2, 609);
-    ret_b = kern.set_gpu_freq(5, 711);
+    ret_a = kern.set_gpu_freq(1, 100);
+    ret_b = kern.set_gpu_freq(1, 200);
     write_gpu_reg(BIOS_SCRATCH_12,
-        encode_uvd_probe(609, 711, ret_a, ret_b));
-    kern.printf("kexec: UVD domain 2/5 base d2=609 ret=%d d5=711 ret=%d\n",
+        encode_uvd_probe(100, 200, ret_a, ret_b));
+    kern.printf("kexec: UVD DCLK range d1=100 ret=%d d1=200 ret=%d\n",
         ret_a, ret_b);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    ret_a = kern.set_gpu_freq(3, 800);
-    ret_b = kern.set_gpu_freq(7, 673);
+    ret_a = kern.set_gpu_freq(1, 400);
+    ret_b = kern.set_gpu_freq(1, 673);
     write_gpu_reg(BIOS_SCRATCH_13,
-        encode_uvd_probe(800, 673, ret_a, ret_b));
-    kern.printf("kexec: UVD domain 3/7 base d3=800 ret=%d d7=673 ret=%d\n",
+        encode_uvd_probe(400, 673, ret_a, ret_b));
+    kern.printf("kexec: UVD DCLK range d1=400 ret=%d d1=673 ret=%d\n",
         ret_a, ret_b);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
