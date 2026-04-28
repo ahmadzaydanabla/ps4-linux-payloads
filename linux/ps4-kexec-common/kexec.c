@@ -133,7 +133,7 @@ int sys_kexec(void *td, struct sys_kexec_args *uap)
         goto cleanup;
     }
 
-    // Set gpu frequencies and pstate
+    // Set gpu frequencies and pstate   
     //                      FAT&SLIM / PRO
     if (kern.gpu_devid_is_9924()){
         // PS4 PRO

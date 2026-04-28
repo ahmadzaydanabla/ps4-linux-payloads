@@ -113,7 +113,6 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
                       SMAP_TYPE_MEMORY);
 }
 
-#define RD32(a) *(volatile u32 *)PA_TO_DM(a)
 #define WR32(a, v) *(volatile u32 *)PA_TO_DM(a) = (v)
 
 #define MC_VM_FB_LOCATION 0x2024
@@ -121,39 +120,9 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define HDP_NONSURFACE_BASE 0x2c04
 #define CONFIG_MEMSIZE 0x5428
 
-#define GPU_MMIO_BASE 0xe4800000
-#define BIOS_SCRATCH_10 0x5d3
-#define BIOS_SCRATCH_11 0x5d4
-#define BIOS_SCRATCH_12 0x5d5
-#define BIOS_SCRATCH_13 0x5d6
-#define BIOS_SCRATCH_14 0x5d7
-#define BIOS_SCRATCH_15 0x5d8
-#define BIOS_SCRATCH_2 0x5cb
-#define BIOS_SCRATCH_4 0x5cd
-#define BIOS_SCRATCH_5 0x5ce
-#define BIOS_SCRATCH_6 0x5cf
-#define BIOS_SCRATCH_7 0x5d0
-#define BIOS_SCRATCH_8 0x5d1
-#define BIOS_SCRATCH_9 0x5d2
-#define PS4_UVD_PROBE_MAGIC 0x55564450
-#define PS4_UVD_CLOCK_MAGIC 0x55564432
-
-static void write_gpu_reg(u32 reg, u32 value)
-{
-    WR32(GPU_MMIO_BASE + reg * 4, value);
-}
-
-static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
-{
-    return ((dclk & 0x3ff) << 22)
-         | ((vclk & 0x3ff) << 12)
-         | (((u32)dclk_ret & 0x3f) << 6)
-         | ((u32)vclk_ret & 0x3f);
-}
-
 static void configure_vram(void)
 {
-    u64 mmio_base = GPU_MMIO_BASE;
+    u64 mmio_base = 0xe4800000;
     u64 fb_base = 0x0f00000000;
     u64 fb_top = fb_base + vram_mb * vram_size - 1;
 
@@ -463,31 +432,6 @@ static void cpu_quiesce_gate(void *arg)
     *(volatile u64 *)PA_TO_DM(0xe4805e1c) = 0x500000f0;
     *(volatile u64 *)PA_TO_DM(0xe4805e30) = 0x156;
     *(volatile u64 *)PA_TO_DM(0xe4805e34) = 0x014510f0;
-
-    /*
-     * UVD clock probing and late Sony clock calls can leave hidden GPU state
-     * that makes amdgpu fail GPU posting. Disable all post-reset clock/SMC
-     * interaction until the boot path is stable again.
-     */
-    write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
-    write_gpu_reg(BIOS_SCRATCH_11,
-        encode_uvd_probe(450, 500, -3, -3));
-    write_gpu_reg(BIOS_SCRATCH_12,
-        encode_uvd_probe(550, 600, -3, -3));
-    write_gpu_reg(BIOS_SCRATCH_13,
-        encode_uvd_probe(625, 650, -3, -3));
-    write_gpu_reg(BIOS_SCRATCH_2,
-        ((u32)-3 & 0xffff) << 16 | ((u32)-3 & 0xffff));
-    write_gpu_reg(BIOS_SCRATCH_4, 0);
-    write_gpu_reg(BIOS_SCRATCH_5, 0);
-    write_gpu_reg(BIOS_SCRATCH_6, 0);
-    write_gpu_reg(BIOS_SCRATCH_7, 0);
-    write_gpu_reg(BIOS_SCRATCH_8, 0);
-    write_gpu_reg(BIOS_SCRATCH_9, 0);
-    write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
-    write_gpu_reg(BIOS_SCRATCH_15,
-        ((u32)-3 & 0xffff) << 16 | ((u32)-3 & 0xffff));
-    kern.printf("kexec: UVD clock probes disabled for amdgpu post recovery\n");
 
     uart_write_str("kexec: About to relocate and jump to kernel\n");
 

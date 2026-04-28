@@ -365,6 +365,18 @@ Follow-up after recovery patch still failed:
   - scratch snapshot regs are written as `0`
 - If amdgpu posts with this, reintroduce only one post-reset operation at a time.
 
+Hard recovery after `c10fd33` still failed:
+
+- Even disabling post-reset clock/SMC interaction did not recover amdgpu posting.
+- The safe move is to revert the whole payload source back before the UVD experiment series that started at `c8dc2b8`.
+- Keep this memory file and the Linux-side clock reader, but revert payload/kernel source edits:
+  - `linux/ps4-kexec-common/kexec.c`
+  - `linux/ps4-kexec-common/linux_boot.c`
+  - `linux/ps4-kexec-common/kernel.h`
+  - `linux/ps4-kexec-common/kernel.c`
+  - `linux/magic.h`
+- If amdgpu still fails after this hard source rollback, the issue is not from the UVD payload experiments and we need to inspect the kernel/amdgpu tree.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.

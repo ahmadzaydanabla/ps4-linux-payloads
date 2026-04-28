@@ -91,9 +91,7 @@ struct ksym_t {
     void *edid;
     void (*wlanbt)(unsigned int state);
     int (*kern_reboot)(int magic);
-    int (*set_gpu_freq)(unsigned int num, unsigned int freq);
-    int (*smc_read_reg)(u32 reg, u32 *value);
-    int (*smc_write_reg)(u32 reg, u32 value);
+    void(*set_gpu_freq)(unsigned int num, unsigned int freq);
     void(*set_pstate)(unsigned int val);
     void(*update_vddnp)(unsigned int val);
     void(*set_cu_power_gate)(unsigned int val);
