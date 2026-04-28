@@ -113,6 +113,7 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
                       SMAP_TYPE_MEMORY);
 }
 
+#define RD32(a) *(volatile u32 *)PA_TO_DM(a)
 #define WR32(a, v) *(volatile u32 *)PA_TO_DM(a) = (v)
 
 #define MC_VM_FB_LOCATION 0x2024
@@ -127,16 +128,38 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define BIOS_SCRATCH_13 0x5d6
 #define BIOS_SCRATCH_14 0x5d7
 #define BIOS_SCRATCH_15 0x5d8
+#define BIOS_SCRATCH_4 0x5cd
+#define BIOS_SCRATCH_5 0x5ce
+#define BIOS_SCRATCH_6 0x5cf
+#define BIOS_SCRATCH_7 0x5d0
+#define BIOS_SCRATCH_8 0x5d1
 #define BIOS_SCRATCH_9 0x5d2
 #define PS4_UVD_PROBE_MAGIC 0x55564450
 #define PS4_UVD_CLOCK_MAGIC 0x55564432
+#define SMC_IND_INDEX_0 0x80
+#define SMC_IND_DATA_0 0x81
+#define CG_DCLK_CNTL 0xc050009c
+#define CG_DCLK_STATUS 0xc05000a0
+#define CG_VCLK_CNTL 0xc05000a4
+#define CG_VCLK_STATUS 0xc05000a8
 #define UVD_SOFT_RESET 0x3d3d
 #define UVD_CGC_CTRL 0x3d2c
 #define UVD_CGC_GATE 0x3d2d
 
+static u32 read_gpu_reg(u32 reg)
+{
+    return RD32(GPU_MMIO_BASE + reg * 4);
+}
+
 static void write_gpu_reg(u32 reg, u32 value)
 {
     WR32(GPU_MMIO_BASE + reg * 4, value);
+}
+
+static u32 read_smc_indirect(u32 reg)
+{
+    write_gpu_reg(SMC_IND_INDEX_0, reg);
+    return read_gpu_reg(SMC_IND_DATA_0);
 }
 
 static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
@@ -562,6 +585,11 @@ static void cpu_quiesce_gate(void *arg)
     apply_uvd_clock_precondition(0x0000018c, 0);
     final_vclk_ret = kern.set_gpu_freq(6, 711);
     final_dclk_ret = kern.set_gpu_freq(1, final_dclk);
+    write_gpu_reg(BIOS_SCRATCH_4, read_smc_indirect(CG_DCLK_CNTL));
+    write_gpu_reg(BIOS_SCRATCH_5, read_smc_indirect(CG_DCLK_STATUS));
+    write_gpu_reg(BIOS_SCRATCH_6, read_smc_indirect(CG_VCLK_CNTL));
+    write_gpu_reg(BIOS_SCRATCH_7, read_smc_indirect(CG_VCLK_STATUS));
+    write_gpu_reg(BIOS_SCRATCH_8, read_gpu_reg(UVD_CGC_CTRL));
     write_gpu_reg(BIOS_SCRATCH_9, final_dclk);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_15,

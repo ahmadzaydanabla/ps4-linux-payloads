@@ -271,6 +271,23 @@ Interpretation:
 - The next patch should find the upper accepted range between `400` and `673`, then finalize with the highest accepted DCLK instead of known-bad `673`.
 - `CG_DCLK_CNTL` moving from DIV 21 to DIV 32 proves domain 1 writes the DCLK control register, but the chosen accepted value can still map to a bad/slow divider.
 
+Latest result from commit `ca9d5fa Probe upper UVD DCLK range`:
+
+```text
+dclk-450-500 = 450 ret=0, 500 ret=0
+dclk-550-600 = 550 ret=0, 600 ret=0
+dclk-625-650 = 625 ret=0, 650 ret=1
+final         = DCLK target 625, DCLK ret=0, VCLK ret=0
+post-boot     = CG_DCLK_CNTL DIV 21 (~38 MHz), CG_DCLK_STATUS DIV 3 (~266 MHz)
+```
+
+Interpretation:
+
+- Highest known accepted DCLK target is `625`; `650` fails.
+- Final kexec calls now return success for both DCLK and VCLK.
+- Post-boot control regs still look low, while DCLK status changed. Need to know whether kexec had good control/status values before Linux jumped, or whether amdgpu/Linux reset/clock-gate code overwrote the control regs during boot.
+- Next patch adds kexec-side final snapshots of `CG_DCLK_CNTL`, `CG_DCLK_STATUS`, `CG_VCLK_CNTL`, `CG_VCLK_STATUS`, and `UVD_CGC_CTRL` into BIOS scratch regs before the kernel jump.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -368,6 +385,7 @@ Reason:
   - scratch11: DCLK 450/500 MHz
   - scratch12: DCLK 550/600 MHz
   - scratch13: DCLK 625/650 MHz
+  - scratch4-8: final kexec-side clock/control snapshots before Linux handoff
   - scratch9: final selected DCLK target
 
 ## Current Theory

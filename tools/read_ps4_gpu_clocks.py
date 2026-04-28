@@ -59,6 +59,11 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_CTRL", 0x3D65),
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
+    MmioReg("BIOS_SCRATCH_4", 0x05CD, "kexec final CG_DCLK_CNTL snapshot"),
+    MmioReg("BIOS_SCRATCH_5", 0x05CE, "kexec final CG_DCLK_STATUS snapshot"),
+    MmioReg("BIOS_SCRATCH_6", 0x05CF, "kexec final CG_VCLK_CNTL snapshot"),
+    MmioReg("BIOS_SCRATCH_7", 0x05D0, "kexec final CG_VCLK_STATUS snapshot"),
+    MmioReg("BIOS_SCRATCH_8", 0x05D1, "kexec final UVD_CGC_CTRL snapshot"),
     MmioReg("BIOS_SCRATCH_9", 0x05D2, "kexec final DCLK target MHz"),
     MmioReg("BIOS_SCRATCH_10", 0x05D3, "kexec UVD probe marker"),
     MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec DCLK range 450/500 probe"),
@@ -327,6 +332,25 @@ def print_report(result: dict) -> None:
         elif kexec["marker_ok"]:
             print("  result     = At least one final set_gpu_freq call returned failure.")
     print()
+
+    if kexec and kexec["marker_ok"]:
+        print("=== Kexec Final Clock Snapshot ===")
+        snapshots = [
+            ("DCLK_CNTL", "BIOS_SCRATCH_4"),
+            ("DCLK_STATUS", "BIOS_SCRATCH_5"),
+            ("VCLK_CNTL", "BIOS_SCRATCH_6"),
+            ("VCLK_STATUS", "BIOS_SCRATCH_7"),
+        ]
+        for label, name in snapshots:
+            value = mmio.get(name)
+            if value is None:
+                continue
+            detail = format_clock(value, result["spll_mhz"])
+            print(f"  {label:<11} = 0x{value:08X}  {detail}")
+        cgc_ctrl = mmio.get("BIOS_SCRATCH_8")
+        if cgc_ctrl is not None:
+            print(f"  UVD_CGC_CTRL = 0x{cgc_ctrl:08X}")
+        print()
 
     smc = result["smc"]
     if smc:
