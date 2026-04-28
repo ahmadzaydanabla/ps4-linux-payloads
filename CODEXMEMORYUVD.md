@@ -288,6 +288,22 @@ Interpretation:
 - Post-boot control regs still look low, while DCLK status changed. Need to know whether kexec had good control/status values before Linux jumped, or whether amdgpu/Linux reset/clock-gate code overwrote the control regs during boot.
 - Next patch adds kexec-side final snapshots of `CG_DCLK_CNTL`, `CG_DCLK_STATUS`, `CG_VCLK_CNTL`, `CG_VCLK_STATUS`, and `UVD_CGC_CTRL` into BIOS scratch regs before the kernel jump.
 
+Latest result from commit `7146024 Capture UVD clock handoff state`:
+
+```text
+final        = DCLK target 625, DCLK ret=0, VCLK ret=0
+kexec DCLK  = CNTL DIV 21 (~38 MHz), STATUS DIV 3 (~266 MHz)
+kexec VCLK  = CNTL DIV 19 (~42 MHz), STATUS DIV 1 (~800 MHz)
+kexec CGC   = UVD_CGC_CTRL=0x18c, UVD_SOFT_RESET later reads 0
+post-boot    = same DCLK/VCLK control/status split
+```
+
+Interpretation:
+
+- Linux is not the first clobberer. The control/status split already exists before handoff.
+- Sony's accepted clock request updates the status/current divider path, but leaves the control selector at the old low divider.
+- Next patch should try a raw SMC indirect write after Sony returns success: preserve the upper control bits and copy the low 7-bit divider from STATUS into CNTL for DCLK and VCLK.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -385,7 +401,7 @@ Reason:
   - scratch11: DCLK 450/500 MHz
   - scratch12: DCLK 550/600 MHz
   - scratch13: DCLK 625/650 MHz
-  - scratch4-8: final kexec-side clock/control snapshots before Linux handoff
+  - scratch4-8: final kexec-side clock/control snapshots after status-to-control sync
   - scratch9: final selected DCLK target
 
 ## Current Theory

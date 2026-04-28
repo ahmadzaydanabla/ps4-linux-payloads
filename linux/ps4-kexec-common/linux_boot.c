@@ -162,6 +162,22 @@ static u32 read_smc_indirect(u32 reg)
     return read_gpu_reg(SMC_IND_DATA_0);
 }
 
+static void write_smc_indirect(u32 reg, u32 value)
+{
+    write_gpu_reg(SMC_IND_INDEX_0, reg);
+    write_gpu_reg(SMC_IND_DATA_0, value);
+}
+
+static void sync_clock_control_to_status(u32 control_reg, u32 status_reg)
+{
+    u32 control = read_smc_indirect(control_reg);
+    u32 status = read_smc_indirect(status_reg);
+    u32 status_divider = status & 0x7f;
+
+    if (status_divider)
+        write_smc_indirect(control_reg, (control & ~0x7f) | status_divider);
+}
+
 static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
 {
     return ((dclk & 0x3ff) << 22)
@@ -585,6 +601,10 @@ static void cpu_quiesce_gate(void *arg)
     apply_uvd_clock_precondition(0x0000018c, 0);
     final_vclk_ret = kern.set_gpu_freq(6, 711);
     final_dclk_ret = kern.set_gpu_freq(1, final_dclk);
+    if (final_dclk_ret == 0)
+        sync_clock_control_to_status(CG_DCLK_CNTL, CG_DCLK_STATUS);
+    if (final_vclk_ret == 0)
+        sync_clock_control_to_status(CG_VCLK_CNTL, CG_VCLK_STATUS);
     write_gpu_reg(BIOS_SCRATCH_4, read_smc_indirect(CG_DCLK_CNTL));
     write_gpu_reg(BIOS_SCRATCH_5, read_smc_indirect(CG_DCLK_STATUS));
     write_gpu_reg(BIOS_SCRATCH_6, read_smc_indirect(CG_VCLK_CNTL));
