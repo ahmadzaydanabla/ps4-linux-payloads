@@ -335,6 +335,8 @@ def print_report(result: dict) -> None:
         print(f"  VCLK sync  = {kexec['vclk_sync_ret']}")
         if kexec["marker_ok"] and kexec["dclk_ret"] == 0 and kexec["vclk_ret"] == 0:
             print("  result     = Sony accepted both final clock requests.")
+        elif kexec["marker_ok"] and kexec["dclk_ret"] == -3 and kexec["vclk_ret"] == -3:
+            print("  result     = UVD clock mutation disabled for amdgpu post recovery.")
         elif kexec["marker_ok"]:
             print("  result     = At least one final set_gpu_freq call returned failure.")
     print()

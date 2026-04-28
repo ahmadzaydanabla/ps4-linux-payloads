@@ -342,6 +342,18 @@ Interpretation:
   - `UVD_SOFT_RESET=0x130`
 - Disable the mediated sync write for now and record sync as `-3`, because boot stability comes first.
 
+Follow-up boot regression:
+
+- Restoring visible UVD regs before Linux was not enough; amdgpu still failed GPU post.
+- This means the risky part is probably one of the UVD clock/probe calls themselves or hidden state latched by those calls, not merely the final visible `UVD_CGC_*` values.
+- Current recovery patch disables all UVD clock mutations/probes after `apply_final_gpu_clocks()`.
+- Scratch values still get written so the reader can confirm this recovery payload:
+  - probe returns are `-3`
+  - final DCLK/VCLK return codes are `-3`
+  - sync return codes are `-3`
+  - final DCLK target is `0`
+- Once amdgpu posts again, resume from this stable base with a single mutation at a time.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
