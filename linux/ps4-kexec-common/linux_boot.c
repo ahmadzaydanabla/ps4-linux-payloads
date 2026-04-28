@@ -132,8 +132,6 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define UVD_SOFT_RESET 0x3d3d
 #define UVD_CGC_CTRL 0x3d2c
 #define UVD_CGC_GATE 0x3d2d
-#define CG_DCLK_CNTL 0xc050009c
-#define CG_VCLK_CNTL 0xc05000a4
 
 static void write_gpu_reg(u32 reg, u32 value)
 {
@@ -190,19 +188,6 @@ static void apply_uvd_clock_precondition(u32 cgc_ctrl, u32 cgc_gate)
     write_gpu_reg(UVD_CGC_GATE, cgc_gate);
     write_gpu_reg(UVD_CGC_CTRL, cgc_ctrl);
     write_gpu_reg(UVD_SOFT_RESET, 0);
-}
-
-static int direct_smc_clock_div_write_only(u32 control_reg, u32 divider)
-{
-    if (!kern.smc_write_reg)
-        return -2;
-
-    /*
-     * The read command can be denied when called directly from kexec, so also
-     * test a write-only path. A value of 1 means direct mode disabled and low
-     * divider bits set to 1, matching the field Sony writes after script calc.
-     */
-    return kern.smc_write_reg(control_reg, divider & 0x7f);
 }
 
 static void configure_vram(void)
@@ -521,48 +506,47 @@ static void cpu_quiesce_gate(void *arg)
     apply_final_gpu_clocks();
 
     /*
-     * Probe DCLK after UVD gate/reset precondition profiles from the known
-     * Liverpool notes. Always request VCLK first since base VCLK is accepted.
+     * Probe Sony clock domains that are applied around UVD setup. Domain 1 is
+     * DCLK and domain 6 is VCLK, but domains 2/5 are also part of Sony's stock
+     * ladder and may be DCLK prerequisites.
      */
-    int dclk_ret = 1;
-    int vclk_ret = 1;
-    u32 final_dclk = 1;
-    u32 final_vclk = 1;
+    int ret_a = 1;
+    int ret_b = 1;
 
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
 
     apply_uvd_clock_precondition(0, 0);
-    vclk_ret = kern.set_gpu_freq(6, 711);
-    dclk_ret = kern.set_gpu_freq(1, 673);
+    ret_a = kern.set_gpu_freq(1, 673);
+    ret_b = kern.set_gpu_freq(6, 711);
     write_gpu_reg(BIOS_SCRATCH_11,
-        encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD cgc0 base VCLK=711 ret=%d DCLK=673 ret=%d\n",
-        vclk_ret, dclk_ret);
+        encode_uvd_probe(673, 711, ret_a, ret_b));
+    kern.printf("kexec: UVD domain 1/6 base d1=673 ret=%d d6=711 ret=%d\n",
+        ret_a, ret_b);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = kern.set_gpu_freq(6, 711);
-    dclk_ret = kern.set_gpu_freq(1, 673);
+    ret_a = kern.set_gpu_freq(2, 609);
+    ret_b = kern.set_gpu_freq(5, 711);
     write_gpu_reg(BIOS_SCRATCH_12,
-        encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD cgc18c base VCLK=711 ret=%d DCLK=673 ret=%d\n",
-        vclk_ret, dclk_ret);
+        encode_uvd_probe(609, 711, ret_a, ret_b));
+    kern.printf("kexec: UVD domain 2/5 base d2=609 ret=%d d5=711 ret=%d\n",
+        ret_a, ret_b);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = direct_smc_clock_div_write_only(CG_VCLK_CNTL, 1);
-    dclk_ret = direct_smc_clock_div_write_only(CG_DCLK_CNTL, 1);
+    ret_a = kern.set_gpu_freq(3, 800);
+    ret_b = kern.set_gpu_freq(7, 673);
     write_gpu_reg(BIOS_SCRATCH_13,
-        encode_uvd_probe(1, 1, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD direct L2 write div1 VCLK ret=%d DCLK ret=%d\n",
-        vclk_ret, dclk_ret);
+        encode_uvd_probe(800, 673, ret_a, ret_b));
+    kern.printf("kexec: UVD domain 3/7 base d3=800 ret=%d d7=673 ret=%d\n",
+        ret_a, ret_b);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = direct_smc_clock_div_write_only(CG_VCLK_CNTL, 1);
-    dclk_ret = direct_smc_clock_div_write_only(CG_DCLK_CNTL, 1);
+    ret_b = kern.set_gpu_freq(6, 711);
+    ret_a = kern.set_gpu_freq(1, 673);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_15,
-        ((u32)dclk_ret & 0xffff) << 16 | ((u32)vclk_ret & 0xffff));
-    kern.printf("kexec: final UVD direct divs DCLK=%u ret=%d VCLK=%u ret=%d\n",
-        final_dclk, dclk_ret, final_vclk, vclk_ret);
+        ((u32)ret_a & 0xffff) << 16 | ((u32)ret_b & 0xffff));
+    kern.printf("kexec: final UVD set_gpu_freq DCLK=673 ret=%d VCLK=711 ret=%d\n",
+        ret_a, ret_b);
 
     uart_write_str("kexec: About to relocate and jump to kernel\n");
 

@@ -222,6 +222,22 @@ Interpretation of `-13`:
 - `-13` happened in the read-modify-write direct path before the write attempt, because `direct_smc_clock_div()` returns immediately when `smc_read_reg()` fails.
 - Next probe should test write-only through Sony's mediated write helper to find out whether only direct reads are denied or writes are denied too.
 
+Latest result from commit `585fbac` plus build fix `41c92d8`:
+
+```text
+cgc0-base   = DCLK=673 ret=1  VCLK=711 ret=0
+cgc18c-base = DCLK=673 ret=1  VCLK=711 ret=0
+l2-write1   = DCLK=1   ret=-13 VCLK=1   ret=-13
+final       = DCLK ret=-13 VCLK ret=-13
+```
+
+Interpretation:
+
+- Direct mediated write-only is denied too.
+- This means the helper pointer exists, but direct use from our kexec call site is not accepted, or the helper offset/signature is not safe enough to use directly.
+- Do not keep finalizing with the direct write path because it produces final `-13` for both clocks.
+- Next patch should restore final clock application through `set_gpu_freq` and probe other Sony clock domains instead.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -313,7 +329,11 @@ Reason:
   - no-UVD-IP working-ish state: `UVD_STATUS=0x3`, `UVD_SOFT_RESET=0`, `UVD_CGC_CTRL=0x1fff018d`
 - Notes also say `CGC_CTRL=0`, `CGC_CTRL=0x18c`, and `CGC_GATE=0` read back correctly.
 - If Sony's DCLK helper rejects because UVD is gated/reset, one of these profiles should let base DCLK return `0`.
-- If Sony's `set_gpu_freq` script rejects DCLK but the mediated L2 write path works, `l2-write1` should return `0` and post-boot `CG_DCLK_CNTL` should change from divider `21` to divider `1`.
+- Direct mediated read/write and write-only attempts returned `-13`, so the direct helper path is no longer the current test.
+- Current probe should check whether adjacent Sony clock domains affect post-boot DCLK/VCLK:
+  - domain 1/6: known DCLK/VCLK pair
+  - domain 2/5: stock kexec-adjacent domains
+  - domain 3/7: stock common domains
 
 ## Current Theory
 
@@ -345,7 +365,7 @@ Primary success line:
 
 ```text
 cgc0-base or cgc18c-base = DCLK=673 ret=0 VCLK=711 ret=0
-or l2-write1 = DCLK=1 ret=0 VCLK=1 ret=0, with CG_DCLK_CNTL raw low divider 1
+or any domain-pair probe changes post-boot `CG_DCLK_CNTL` away from DIV 21
 ```
 
 If that happens, UVD gate/reset state was the DCLK precondition and the next job is to confirm actual `CG_DCLK_CNTL`/`CG_VCLK_CNTL` values changed from the ~40 MHz dividers.
