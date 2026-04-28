@@ -1,0 +1,307 @@
+# PS4 UVD Clock Memory
+
+This file is here so future work does not repeat already-solved confusion.
+
+## Goal
+
+Get PS4 Liverpool/Gladius UVD decode working at a real hardware clock under Linux.
+
+Current bad state: UVD can initialize, but decode is effectively useless because UVD clocks stay around 40 MHz.
+
+The user has already tried direct Linux-side clock pokes. `liverpool_clk.c` style writes are not enough because SAMU/SMC firmware ownership overrides or rejects the clock state. Do not assume simply enabling UVD in the kernel fixes this.
+
+## Hardware Clock Names
+
+- `DCLK` is the UVD decode clock. This is the main throughput clock for decode.
+- `VCLK` is the UVD video clock.
+- `ECLK` is VCE encode clock, not UVD decode.
+
+Important correction:
+
+- `0xC05000A0` is `CG_DCLK_STATUS`, not ECLK.
+- `0xC05000AC` is `CG_ECLK_CNTL`.
+
+## Known SMC Clock Registers
+
+- `CG_SPLL_FUNC_CNTL`: `0xC0500140`
+- `CG_SPLL_FUNC_CNTL_2`: `0xC050004C`
+- `CG_SPLL_FUNC_CNTL_3`: `0xC0500050`
+- `CG_SCLK_CNTL`: `0xC050008C`
+- `CG_ACLK_CNTL`: `0xC0500094`
+- `CG_DCLK_CNTL`: `0xC050009C`, UVD decode clock control
+- `CG_DCLK_STATUS`: `0xC05000A0`, status, not ECLK
+- `CG_VCLK_CNTL`: `0xC05000A4`, UVD video clock control
+- `CG_VCLK_STATUS`: `0xC05000A8`
+- `CG_ECLK_CNTL`: `0xC05000AC`, VCE encode clock control
+- `GCK_DFS_BYPASS_CNTL`: `0xC0500118`
+
+The Python reader assumes SPLL source `800 MHz` for rough divider math.
+
+## Known UVD MMIO Registers
+
+- `GRBM_STATUS`: `0x2004`
+- `GRBM_STATUS2`: `0x2002`
+- `UVD_STATUS`: `0x3DAF`
+- `UVD_SOFT_RESET`: `0x3D3D`
+- `UVD_POWER_STATUS`: `0x3D4C`
+- `UVD_PGFSM_STATUS`: `0x3D20`
+- `UVD_PGFSM_CONFIG`: `0x3D21`
+- `UVD_CGC_STATUS`: `0x3D2B`
+- `UVD_CGC_CTRL`: `0x3D2C`
+- `UVD_CGC_GATE`: `0x3D2D`
+- `UVD_LMI_CTRL`: `0x3D65`
+- `UVD_LMI_STATUS`: `0x3D66`
+- `UVD_VCPU_CNTL`: `0x3D4A`
+
+## Scratch Register Protocol Used By Our Payload
+
+The kexec payload writes diagnostics into GPU BIOS scratch registers so Linux can read them through BAR5.
+
+- `BIOS_SCRATCH_10`: `0x05D3`, probe marker
+- `BIOS_SCRATCH_11`: `0x05D4`, base probe result
+- `BIOS_SCRATCH_12`: `0x05D5`, mid probe result
+- `BIOS_SCRATCH_13`: `0x05D6`, high probe result
+- `BIOS_SCRATCH_14`: `0x05D7`, final UVD clock marker
+- `BIOS_SCRATCH_15`: `0x05D8`, final DCLK/VCLK return codes
+
+Markers:
+
+- Probe marker: `0x55564450`, ASCII-ish `UVDP`
+- Final marker: `0x55564432`, ASCII-ish `UVD2`
+
+Probe encoding:
+
+```c
+((dclk & 0x3ff) << 22)
+| ((vclk & 0x3ff) << 12)
+| ((dclk_ret & 0x3f) << 6)
+| (vclk_ret & 0x3f)
+```
+
+Return fields are decoded as signed 6-bit values in the Python tool.
+
+## Return Value Semantics
+
+Do not get this backwards:
+
+- `ret=0` means Sony's `set_gpu_freq` path accepted the request.
+- `ret=1` on DCLK/VCLK means Sony's helper returned failure for that path.
+
+Earlier speculation that a nonzero return might mean “accepted but no visible register change” was wrong for DCLK/VCLK after re-reading the public update PUP disassembly.
+
+## Public Update PUP Reverse-Engineering Notes
+
+The relevant public update PUP code path was reverse-read around Sony's `set_gpu_freq`.
+
+Known function pointer in payload:
+
+- `kern.set_gpu_freq(num, freq)`
+- In `kernel.h`, this must be typed as `int (*set_gpu_freq)(unsigned int num, unsigned int freq)` so return codes are not discarded.
+
+Known FW offset context from the public PUP analysis:
+
+- `set_gpu_freq` entry was observed at raw PUP offset `0x631b00`.
+- This mapped from kexec magic offset `0x4b0b00 + 0x181000`.
+- Jump table was observed at `0x98d6a8`.
+- Domain `1` maps to the DCLK path around `0x631cb2`.
+- Domain `6` maps to the VCLK path around `0x631d69`.
+
+DCLK path behavior:
+
+- Reads `0xC050009C`.
+- Clears bit `0x100` with `and 0xfffffeff`.
+- Writes back through Sony's L2/SMC write helper around `0x79c190`.
+- Calls helper around `0x633850(freq * 100, 0xC050009C, 0xC05000A0)`.
+- After the helper call, code does roughly `cmp eax, -1; sete bl`.
+- Therefore it returns `1` when helper `0x633850` returned `-1`.
+
+VCLK path is analogous:
+
+- Uses control `0xC05000A4`.
+- Uses status `0xC05000A8`.
+
+Helper `0x633850` behavior:
+
+- Waits for status bit 0 through Sony's L2 read helper around `0x79c070`.
+- Calls a table/script interpreter around `0x633c90` for the requested frequency.
+- Returns `0xffffffff` on interpreter failure or write failure.
+- On success, writes only the low 7 bits of the clock control value, derived from the computed result high byte:
+  - read CNTL
+  - `old & 0xffffff80 | (computed >> 24)`
+  - write through L2/SMC write helper
+
+Important implication:
+
+- If `DCLK_STATUS` bit 0 is set but DCLK still returns `1`, the failure is probably not the simple status-ready wait.
+- The likely failure is the table/script interpreter rejecting the request, or the L2/SMC write path refusing DCLK because a precondition is missing.
+
+## Known Runtime Evidence
+
+Last known output after testing commit `63f2af3` was unchanged from before:
+
+```text
+BIOS_SCRATCH_10 = 0x55564450
+BIOS_SCRATCH_11 = 0xA86C7040
+BIOS_SCRATCH_12 = 0xC8320041
+BIOS_SCRATCH_13 = 0xD57D8041
+BIOS_SCRATCH_14 = 0x55564432
+BIOS_SCRATCH_15 = 0x00010001
+```
+
+Decoded:
+
+```text
+base = DCLK=673 ret=1 VCLK=711 ret=0
+mid  = DCLK=800 ret=1 VCLK=800 ret=1
+high = DCLK=853 ret=1 VCLK=984 ret=1
+```
+
+Same boot clock state:
+
+```text
+CG_DCLK_CNTL   = 0x00000015 -> DIV 21 -> ~38.1 MHz
+CG_DCLK_STATUS = 0x00000003
+CG_VCLK_CNTL   = 0x00000013 -> DIV 19 -> ~42.1 MHz
+CG_VCLK_STATUS = 0x00000003
+CG_ECLK_CNTL   = 0x00000016 -> DIV 22 -> ~36.4 MHz
+```
+
+Interpretation:
+
+- The probe code definitely ran.
+- VCLK base `711` can be accepted.
+- DCLK base `673` is rejected.
+- Replaying the full GPU clock ladder after the late GPU reset did not change the result.
+- Therefore the current blocker is DCLK-specific, not “all UVD clocks are impossible.”
+
+## Tried So Far
+
+- Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
+- Moved UVD clock requests to the final handoff point after late GPU reset.
+- Added Linux-side reader `tools/read_ps4_gpu_clocks.py`.
+- Corrected register labels:
+  - `0xC05000A0` is `CG_DCLK_STATUS`.
+  - `0xC05000AC` is `CG_ECLK_CNTL`.
+- Probed base/mid/high DCLK/VCLK pairs.
+- Replayed the full Sony-style GPU pstate/frequency/CU-gate/VDDNP ladder after reset with commit `63f2af3`.
+
+Result:
+
+- None of the above made DCLK accept even base `673`.
+- VCLK base `711` still accepts.
+
+## Previous Patch Tested
+
+Commit pushed:
+
+- `63f2af3 Reapply GPU clock ladder before UVD probe`
+
+Repo/branch:
+
+- `ahmadzaydanabla/ps4-linux-payloads`
+- `master`
+
+What it changed:
+
+- Added `apply_final_gpu_clocks()` in `linux/ps4-kexec-common/linux_boot.c`.
+- This replays the full Sony-style pstate/frequency/CU-gate/VDDNP setup after the late GPU reset/audio setup.
+- Then it runs the UVD probe table again.
+
+Reason:
+
+- `sys_kexec` applies the GPU clock ladder early, but `linux_boot.c` later resets/reconfigures the GPU.
+- That reset may wipe dependencies needed by Sony's DCLK path.
+- Re-requesting only DCLK/VCLK after reset may be too narrow.
+
+Result:
+
+- Test output stayed the same:
+  - `DCLK=673 ret=1`
+  - `VCLK=711 ret=0`
+  - DCLK/VCLK control regs stayed around 40 MHz.
+
+## Current Patch Under Test
+
+Commit being prepared after the unchanged `63f2af3` result:
+
+- Probe order dependency explicitly.
+
+Change:
+
+- `BIOS_SCRATCH_11`: DCLK-first base probe, `DCLK=673` then `VCLK=711`.
+- `BIOS_SCRATCH_12`: VCLK-first base probe, `VCLK=711` then `DCLK=673`.
+- `BIOS_SCRATCH_13`: VCLK-first high probe, `VCLK=984` then `DCLK=853`.
+- Final reapply now also uses VCLK-first order and reports the real final return codes in `BIOS_SCRATCH_15`.
+
+Reason:
+
+- The only accepted UVD-related request observed so far is `VCLK=711`.
+- The old probe never retried `DCLK=673` after the accepted base VCLK state.
+- If DCLK depends on VCLK being accepted first, `v-first-base` should flip DCLK from `ret=1` to `ret=0`.
+
+## Current Theory
+
+DCLK fails because a DCLK-specific precondition is missing at the final handoff point.
+
+Likely preconditions to investigate:
+
+- DCLK domain still power-gated.
+- UVD still in reset or partial reset.
+- UVD clock gate state blocks DCLK writes.
+- Pstate/SCLK/MCLK/voltage/CU gate setup is incomplete after late GPU reset.
+- Sony's table/script interpreter refuses DCLK because another domain state is not ready.
+
+Less likely:
+
+- Wrong DCLK register address.
+- Wrong domain number for DCLK.
+- General SAMU total block of all UVD clocks, because VCLK base accepted once.
+
+## Next Test
+
+After the order-probe commit builds and boots, run:
+
+```bash
+sudo python3 read_ps4_gpu_clockss.py
+```
+
+Primary success line:
+
+```text
+v-first-base = DCLK=673 ret=0 VCLK=711 ret=0
+```
+
+If that happens, VCLK-first ordering fixed the DCLK precondition and the next job is to confirm actual `CG_DCLK_CNTL`/`CG_VCLK_CNTL` values changed from the ~40 MHz dividers.
+
+## If DCLK Still Returns 1
+
+Do not keep trying random MHz values first. The next work should probe and/or alter DCLK preconditions.
+
+Most useful next diagnostic:
+
+- Record the UVD gate/reset/power registers immediately before and after:
+  - final GPU clock ladder
+  - DCLK request
+  - VCLK request
+
+The current Linux-side reader only sees post-boot final state. If needed, extend kexec scratch logging or add a compact event log in scratch regs to capture intermediate states.
+
+Possible next patch direction:
+
+- Add a kexec-side DCLK precondition probe that reads/writes only known UVD gate/reset state around the DCLK request.
+- Keep using Sony's `set_gpu_freq` path for actual clock changes rather than direct raw SMC writes unless the evidence shows Sony's path cannot be made to accept DCLK.
+
+## Files To Remember
+
+- Payload clock patch file: `linux/ps4-kexec-common/linux_boot.c`
+- Kernel function table type: `linux/ps4-kexec-common/kernel.h`
+- Early clock setup reference: `linux/ps4-kexec-common/kexec.c`
+- Diagnostic reader: `tools/read_ps4_gpu_clocks.py`
+
+## Current Download Command For Reader
+
+```bash
+wget -O read_ps4_gpu_clocks.py https://raw.githubusercontent.com/ahmadzaydanabla/ps4-linux-payloads/refs/heads/master/tools/read_ps4_gpu_clocks.py
+```
+
+The user may have locally named it `read_ps4_gpu_clockss.py`; that typo is okay as long as it is the updated file.
