@@ -200,6 +200,28 @@ Interpretation:
   - final VCLK returned `0`, final DCLK still returned `1`.
 - Therefore the current blocker is DCLK-specific, not “all UVD clocks are impossible.”
 
+Latest result from commit `0ebbf9d Try mediated UVD clock divider writes`:
+
+```text
+cgc0-base   = DCLK=673 ret=1  VCLK=711 ret=0
+cgc18c-base = DCLK=673 ret=1  VCLK=711 ret=0
+l2-div1     = DCLK=1   ret=-13 VCLK=1   ret=-13
+final       = DCLK ret=-13 VCLK ret=-13
+```
+
+Post-boot registers still:
+
+```text
+CG_DCLK_CNTL = 0x00000015 -> DIV 21 -> ~38.1 MHz
+CG_VCLK_CNTL = 0x00000013 -> DIV 19 -> ~42.1 MHz
+```
+
+Interpretation of `-13`:
+
+- The optional 11.00 helper pointers resolved. If they were missing, the direct path would return `-2`.
+- `-13` happened in the read-modify-write direct path before the write attempt, because `direct_smc_clock_div()` returns immediately when `smc_read_reg()` fails.
+- Next probe should test write-only through Sony's mediated write helper to find out whether only direct reads are denied or writes are denied too.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -281,8 +303,8 @@ Change:
 
 - `BIOS_SCRATCH_11`: `cgc0-base`, apply `UVD_CGC_GATE=0`, `UVD_CGC_CTRL=0`, `UVD_SOFT_RESET=0`, then VCLK-first base clocks.
 - `BIOS_SCRATCH_12`: `cgc18c-base`, apply `UVD_CGC_GATE=0`, `UVD_CGC_CTRL=0x0000018c`, `UVD_SOFT_RESET=0`, then VCLK-first base clocks.
-- `BIOS_SCRATCH_13`: `l2-div1`, apply `UVD_CGC_GATE=0`, `UVD_CGC_CTRL=0x0000018c`, `UVD_SOFT_RESET=0`, then use Sony's direct L2 read/write helper to set `CG_VCLK_CNTL` and `CG_DCLK_CNTL` low divider bits to `1`.
-- Final reapply uses the direct L2 divider-1 path.
+- `BIOS_SCRATCH_13`: `l2-write1`, apply `UVD_CGC_GATE=0`, `UVD_CGC_CTRL=0x0000018c`, `UVD_SOFT_RESET=0`, then use Sony's direct L2 write helper only to set `CG_VCLK_CNTL` and `CG_DCLK_CNTL` to low divider `1`.
+- Final reapply uses the direct L2 write-only divider-1 path.
 
 Reason:
 
@@ -291,7 +313,7 @@ Reason:
   - no-UVD-IP working-ish state: `UVD_STATUS=0x3`, `UVD_SOFT_RESET=0`, `UVD_CGC_CTRL=0x1fff018d`
 - Notes also say `CGC_CTRL=0`, `CGC_CTRL=0x18c`, and `CGC_GATE=0` read back correctly.
 - If Sony's DCLK helper rejects because UVD is gated/reset, one of these profiles should let base DCLK return `0`.
-- If Sony's `set_gpu_freq` script rejects DCLK but the mediated L2 write path works, `l2-div1` should return `0` and post-boot `CG_DCLK_CNTL` should change from divider `21` to divider `1`.
+- If Sony's `set_gpu_freq` script rejects DCLK but the mediated L2 write path works, `l2-write1` should return `0` and post-boot `CG_DCLK_CNTL` should change from divider `21` to divider `1`.
 
 ## Current Theory
 
@@ -323,7 +345,7 @@ Primary success line:
 
 ```text
 cgc0-base or cgc18c-base = DCLK=673 ret=0 VCLK=711 ret=0
-or l2-div1 = DCLK=1 ret=0 VCLK=1 ret=0, with CG_DCLK_CNTL raw low divider 1
+or l2-write1 = DCLK=1 ret=0 VCLK=1 ret=0, with CG_DCLK_CNTL raw low divider 1
 ```
 
 If that happens, UVD gate/reset state was the DCLK precondition and the next job is to confirm actual `CG_DCLK_CNTL`/`CG_VCLK_CNTL` values changed from the ~40 MHz dividers.

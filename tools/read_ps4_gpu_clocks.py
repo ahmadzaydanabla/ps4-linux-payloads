@@ -62,7 +62,7 @@ MMIO_REGS = [
     MmioReg("BIOS_SCRATCH_10", 0x05D3, "kexec UVD probe marker"),
     MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec UVD CGC=0 base probe"),
     MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec UVD CGC=0x18c base probe"),
-    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec UVD direct L2 div1 probe"),
+    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec UVD direct L2 write div1 probe"),
     MmioReg("BIOS_SCRATCH_14", 0x05D7, "kexec UVD clock marker"),
     MmioReg("BIOS_SCRATCH_15", 0x05D8, "kexec DCLK/VCLK return codes"),
 ]
@@ -220,7 +220,7 @@ def decode_kexec_probes(mmio_values: dict) -> dict:
     probe_regs = [
         ("cgc0-base", "BIOS_SCRATCH_11"),
         ("cgc18c-base", "BIOS_SCRATCH_12"),
-        ("l2-div1", "BIOS_SCRATCH_13"),
+        ("l2-write1", "BIOS_SCRATCH_13"),
     ]
     probes = []
     for label, name in probe_regs:

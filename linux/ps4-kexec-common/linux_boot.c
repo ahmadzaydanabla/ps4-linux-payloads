@@ -212,6 +212,19 @@ static int direct_smc_clock_div(u32 control_reg, u32 divider)
     return kern.smc_write_reg(control_reg, value);
 }
 
+static int direct_smc_clock_div_write_only(u32 control_reg, u32 divider)
+{
+    if (!kern.smc_write_reg)
+        return -2;
+
+    /*
+     * The read command can be denied when called directly from kexec, so also
+     * test a write-only path. A value of 1 means direct mode disabled and low
+     * divider bits set to 1, matching the field Sony writes after script calc.
+     */
+    return kern.smc_write_reg(control_reg, divider & 0x7f);
+}
+
 static void configure_vram(void)
 {
     u64 mmio_base = GPU_MMIO_BASE;
@@ -555,16 +568,16 @@ static void cpu_quiesce_gate(void *arg)
         vclk_ret, dclk_ret);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = direct_smc_clock_div(CG_VCLK_CNTL, 1);
-    dclk_ret = direct_smc_clock_div(CG_DCLK_CNTL, 1);
+    vclk_ret = direct_smc_clock_div_write_only(CG_VCLK_CNTL, 1);
+    dclk_ret = direct_smc_clock_div_write_only(CG_DCLK_CNTL, 1);
     write_gpu_reg(BIOS_SCRATCH_13,
         encode_uvd_probe(1, 1, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD direct L2 div1 VCLK ret=%d DCLK ret=%d\n",
+    kern.printf("kexec: UVD direct L2 write div1 VCLK ret=%d DCLK ret=%d\n",
         vclk_ret, dclk_ret);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = direct_smc_clock_div(CG_VCLK_CNTL, 1);
-    dclk_ret = direct_smc_clock_div(CG_DCLK_CNTL, 1);
+    vclk_ret = direct_smc_clock_div_write_only(CG_VCLK_CNTL, 1);
+    dclk_ret = direct_smc_clock_div_write_only(CG_DCLK_CNTL, 1);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_15,
         ((u32)dclk_ret & 0xffff) << 16 | ((u32)vclk_ret & 0xffff));
