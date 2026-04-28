@@ -137,30 +137,10 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define BIOS_SCRATCH_9 0x5d2
 #define PS4_UVD_PROBE_MAGIC 0x55564450
 #define PS4_UVD_CLOCK_MAGIC 0x55564432
-#define SMC_IND_INDEX_0 0x80
-#define SMC_IND_DATA_0 0x81
-#define CG_DCLK_CNTL 0xc050009c
-#define CG_DCLK_STATUS 0xc05000a0
-#define CG_VCLK_CNTL 0xc05000a4
-#define CG_VCLK_STATUS 0xc05000a8
-#define UVD_SOFT_RESET 0x3d3d
-#define UVD_CGC_CTRL 0x3d2c
-#define UVD_CGC_GATE 0x3d2d
-
-static u32 read_gpu_reg(u32 reg)
-{
-    return RD32(GPU_MMIO_BASE + reg * 4);
-}
 
 static void write_gpu_reg(u32 reg, u32 value)
 {
     WR32(GPU_MMIO_BASE + reg * 4, value);
-}
-
-static u32 read_smc_indirect(u32 reg)
-{
-    write_gpu_reg(SMC_IND_INDEX_0, reg);
-    return read_gpu_reg(SMC_IND_DATA_0);
 }
 
 static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
@@ -169,38 +149,6 @@ static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
          | ((vclk & 0x3ff) << 12)
          | (((u32)dclk_ret & 0x3f) << 6)
          | ((u32)vclk_ret & 0x3f);
-}
-
-static void apply_final_gpu_clocks(void)
-{
-    /*
-     * sys_kexec applies this before Linux is copied, but the late GPU reset in
-     * this file can undo parts of it. Re-apply the full sequence before probing
-     * UVD-specific clocks so DCLK/VCLK see the same dependencies Sony expects.
-     */
-    if (kern.gpu_devid_is_9924()) {
-        kern.set_gpu_freq(1, 853);
-        kern.set_gpu_freq(2, 711);
-        kern.set_gpu_freq(4, 911);
-        kern.set_gpu_freq(5, 800);
-        kern.set_gpu_freq(6, 984);
-        kern.set_cu_power_gate(0x24);
-    } else {
-        kern.set_pstate(3);
-        kern.set_gpu_freq(0, 800);
-        kern.set_gpu_freq(1, 673);
-        kern.set_gpu_freq(2, 609);
-        kern.set_gpu_freq(4, 800);
-        kern.set_gpu_freq(5, 711);
-        kern.set_gpu_freq(6, 711);
-        kern.set_cu_power_gate(0x12);
-    }
-
-    kern.set_pstate(3);
-    kern.set_gpu_freq(0, 800);
-    kern.set_gpu_freq(3, 800);
-    kern.set_gpu_freq(7, 673);
-    kern.update_vddnp(0x12);
 }
 
 static void configure_vram(void)
@@ -516,11 +464,10 @@ static void cpu_quiesce_gate(void *arg)
     *(volatile u64 *)PA_TO_DM(0xe4805e30) = 0x156;
     *(volatile u64 *)PA_TO_DM(0xe4805e34) = 0x014510f0;
 
-    apply_final_gpu_clocks();
-
     /*
-     * UVD clock probing can leave hidden GPU state that makes amdgpu fail GPU
-     * posting. Disable all UVD mutations until the boot path is stable again.
+     * UVD clock probing and late Sony clock calls can leave hidden GPU state
+     * that makes amdgpu fail GPU posting. Disable all post-reset clock/SMC
+     * interaction until the boot path is stable again.
      */
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_11,
@@ -531,11 +478,11 @@ static void cpu_quiesce_gate(void *arg)
         encode_uvd_probe(625, 650, -3, -3));
     write_gpu_reg(BIOS_SCRATCH_2,
         ((u32)-3 & 0xffff) << 16 | ((u32)-3 & 0xffff));
-    write_gpu_reg(BIOS_SCRATCH_4, read_smc_indirect(CG_DCLK_CNTL));
-    write_gpu_reg(BIOS_SCRATCH_5, read_smc_indirect(CG_DCLK_STATUS));
-    write_gpu_reg(BIOS_SCRATCH_6, read_smc_indirect(CG_VCLK_CNTL));
-    write_gpu_reg(BIOS_SCRATCH_7, read_smc_indirect(CG_VCLK_STATUS));
-    write_gpu_reg(BIOS_SCRATCH_8, read_gpu_reg(UVD_CGC_CTRL));
+    write_gpu_reg(BIOS_SCRATCH_4, 0);
+    write_gpu_reg(BIOS_SCRATCH_5, 0);
+    write_gpu_reg(BIOS_SCRATCH_6, 0);
+    write_gpu_reg(BIOS_SCRATCH_7, 0);
+    write_gpu_reg(BIOS_SCRATCH_8, 0);
     write_gpu_reg(BIOS_SCRATCH_9, 0);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_15,

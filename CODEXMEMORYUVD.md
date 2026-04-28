@@ -354,6 +354,17 @@ Follow-up boot regression:
   - final DCLK target is `0`
 - Once amdgpu posts again, resume from this stable base with a single mutation at a time.
 
+Follow-up after recovery patch still failed:
+
+- Disabling only UVD probes was not enough.
+- The remaining risky path was the late `apply_final_gpu_clocks()` reapply and SMC-indirect snapshot reads after the manual GPU reset.
+- Current recovery patch disables all post-reset clock/SMC interaction:
+  - no `apply_final_gpu_clocks()`
+  - no `set_gpu_freq()` probes
+  - no SMC indirect reads
+  - scratch snapshot regs are written as `0`
+- If amdgpu posts with this, reintroduce only one post-reset operation at a time.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
