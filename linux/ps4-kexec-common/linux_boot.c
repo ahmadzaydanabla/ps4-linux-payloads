@@ -163,20 +163,6 @@ static u32 read_smc_indirect(u32 reg)
     return read_gpu_reg(SMC_IND_DATA_0);
 }
 
-static int sync_clock_control_to_status(u32 control_reg, u32 status_reg)
-{
-    u32 control = read_smc_indirect(control_reg);
-    u32 status = read_smc_indirect(status_reg);
-    u32 status_divider = status & 0x7f;
-
-    if (!status_divider)
-        return -1;
-    if (!kern.smc_write_reg)
-        return -2;
-
-    return kern.smc_write_reg(control_reg, (control & ~0x7f) | status_divider);
-}
-
 static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
 {
     return ((dclk & 0x3ff) << 22)
@@ -227,6 +213,17 @@ static void apply_uvd_clock_precondition(u32 cgc_ctrl, u32 cgc_gate)
     write_gpu_reg(UVD_CGC_GATE, cgc_gate);
     write_gpu_reg(UVD_CGC_CTRL, cgc_ctrl);
     write_gpu_reg(UVD_SOFT_RESET, 0);
+}
+
+static void restore_uvd_for_linux_handoff(void)
+{
+    /*
+     * Leaving Linux with the experimental UVD gate/reset state makes amdgpu
+     * fail GPU posting. Restore the state Linux previously survived with.
+     */
+    write_gpu_reg(UVD_CGC_GATE, 0);
+    write_gpu_reg(UVD_CGC_CTRL, 0x7ffff905);
+    write_gpu_reg(UVD_SOFT_RESET, 0x130);
 }
 
 static void configure_vram(void)
@@ -602,10 +599,8 @@ static void cpu_quiesce_gate(void *arg)
     apply_uvd_clock_precondition(0x0000018c, 0);
     final_vclk_ret = kern.set_gpu_freq(6, 711);
     final_dclk_ret = kern.set_gpu_freq(1, final_dclk);
-    if (final_dclk_ret == 0)
-        dclk_sync_ret = sync_clock_control_to_status(CG_DCLK_CNTL, CG_DCLK_STATUS);
-    if (final_vclk_ret == 0)
-        vclk_sync_ret = sync_clock_control_to_status(CG_VCLK_CNTL, CG_VCLK_STATUS);
+    dclk_sync_ret = -3;
+    vclk_sync_ret = -3;
     write_gpu_reg(BIOS_SCRATCH_2,
         ((u32)dclk_sync_ret & 0xffff) << 16 | ((u32)vclk_sync_ret & 0xffff));
     write_gpu_reg(BIOS_SCRATCH_4, read_smc_indirect(CG_DCLK_CNTL));
@@ -619,6 +614,7 @@ static void cpu_quiesce_gate(void *arg)
         ((u32)final_dclk_ret & 0xffff) << 16 | ((u32)final_vclk_ret & 0xffff));
     kern.printf("kexec: final UVD set_gpu_freq DCLK=%u ret=%d VCLK=711 ret=%d\n",
         final_dclk, final_dclk_ret, final_vclk_ret);
+    restore_uvd_for_linux_handoff();
 
     uart_write_str("kexec: About to relocate and jump to kernel\n");
 

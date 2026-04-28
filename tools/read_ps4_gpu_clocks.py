@@ -59,7 +59,7 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_CTRL", 0x3D65),
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
-    MmioReg("BIOS_SCRATCH_2", 0x05CB, "kexec DCLK/VCLK sync return codes"),
+    MmioReg("BIOS_SCRATCH_2", 0x05CB, "kexec DCLK/VCLK sync return codes (-3 disabled)"),
     MmioReg("BIOS_SCRATCH_4", 0x05CD, "kexec final CG_DCLK_CNTL snapshot"),
     MmioReg("BIOS_SCRATCH_5", 0x05CE, "kexec final CG_DCLK_STATUS snapshot"),
     MmioReg("BIOS_SCRATCH_6", 0x05CF, "kexec final CG_VCLK_CNTL snapshot"),
