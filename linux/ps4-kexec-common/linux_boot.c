@@ -192,26 +192,6 @@ static void apply_uvd_clock_precondition(u32 cgc_ctrl, u32 cgc_gate)
     write_gpu_reg(UVD_SOFT_RESET, 0);
 }
 
-static int direct_smc_clock_div(u32 control_reg, u32 divider)
-{
-    u32 value;
-    int ret;
-
-    if (!kern.smc_read_reg || !kern.smc_write_reg)
-        return -2;
-
-    ret = kern.smc_read_reg(control_reg, &value);
-    if (ret)
-        return ret;
-
-    /*
-     * Match Sony's DCLK/VCLK path: clear direct-control bit 8 and replace the
-     * low divider bits, but bypass the frequency table/script calculation.
-     */
-    value = (value & 0xfffffe80) | (divider & 0x7f);
-    return kern.smc_write_reg(control_reg, value);
-}
-
 static int direct_smc_clock_div_write_only(u32 control_reg, u32 divider)
 {
     if (!kern.smc_write_reg)
