@@ -132,6 +132,8 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define UVD_SOFT_RESET 0x3d3d
 #define UVD_CGC_CTRL 0x3d2c
 #define UVD_CGC_GATE 0x3d2d
+#define CG_DCLK_CNTL 0xc050009c
+#define CG_VCLK_CNTL 0xc05000a4
 
 static void write_gpu_reg(u32 reg, u32 value)
 {
@@ -188,6 +190,26 @@ static void apply_uvd_clock_precondition(u32 cgc_ctrl, u32 cgc_gate)
     write_gpu_reg(UVD_CGC_GATE, cgc_gate);
     write_gpu_reg(UVD_CGC_CTRL, cgc_ctrl);
     write_gpu_reg(UVD_SOFT_RESET, 0);
+}
+
+static int direct_smc_clock_div(u32 control_reg, u32 divider)
+{
+    u32 value;
+    int ret;
+
+    if (!kern.smc_read_reg || !kern.smc_write_reg)
+        return -2;
+
+    ret = kern.smc_read_reg(control_reg, &value);
+    if (ret)
+        return ret;
+
+    /*
+     * Match Sony's DCLK/VCLK path: clear direct-control bit 8 and replace the
+     * low divider bits, but bypass the frequency table/script calculation.
+     */
+    value = (value & 0xfffffe80) | (divider & 0x7f);
+    return kern.smc_write_reg(control_reg, value);
 }
 
 static void configure_vram(void)
@@ -511,8 +533,8 @@ static void cpu_quiesce_gate(void *arg)
      */
     int dclk_ret = 1;
     int vclk_ret = 1;
-    u32 final_dclk = 673;
-    u32 final_vclk = 711;
+    u32 final_dclk = 1;
+    u32 final_vclk = 1;
 
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
 
@@ -524,33 +546,29 @@ static void cpu_quiesce_gate(void *arg)
     kern.printf("kexec: UVD cgc0 base VCLK=711 ret=%d DCLK=673 ret=%d\n",
         vclk_ret, dclk_ret);
 
-    apply_uvd_clock_precondition(0x1fff018d, 0x000fffff);
+    apply_uvd_clock_precondition(0x0000018c, 0);
     vclk_ret = kern.set_gpu_freq(6, 711);
     dclk_ret = kern.set_gpu_freq(1, 673);
     write_gpu_reg(BIOS_SCRATCH_12,
         encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD sony-gate base VCLK=711 ret=%d DCLK=673 ret=%d\n",
-        vclk_ret, dclk_ret);
-
-    apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = kern.set_gpu_freq(6, 711);
-    dclk_ret = kern.set_gpu_freq(1, 673);
-    write_gpu_reg(BIOS_SCRATCH_13,
-        encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
     kern.printf("kexec: UVD cgc18c base VCLK=711 ret=%d DCLK=673 ret=%d\n",
         vclk_ret, dclk_ret);
-    if (dclk_ret == 0 && vclk_ret == 0) {
-        final_dclk = 673;
-        final_vclk = 711;
-    }
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    vclk_ret = kern.set_gpu_freq(6, final_vclk);
-    dclk_ret = kern.set_gpu_freq(1, final_dclk);
+    vclk_ret = direct_smc_clock_div(CG_VCLK_CNTL, 1);
+    dclk_ret = direct_smc_clock_div(CG_DCLK_CNTL, 1);
+    write_gpu_reg(BIOS_SCRATCH_13,
+        encode_uvd_probe(1, 1, dclk_ret, vclk_ret));
+    kern.printf("kexec: UVD direct L2 div1 VCLK ret=%d DCLK ret=%d\n",
+        vclk_ret, dclk_ret);
+
+    apply_uvd_clock_precondition(0x0000018c, 0);
+    vclk_ret = direct_smc_clock_div(CG_VCLK_CNTL, 1);
+    dclk_ret = direct_smc_clock_div(CG_DCLK_CNTL, 1);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_15,
         ((u32)dclk_ret & 0xffff) << 16 | ((u32)vclk_ret & 0xffff));
-    kern.printf("kexec: final UVD clocks DCLK=%u ret=%d VCLK=%u ret=%d\n",
+    kern.printf("kexec: final UVD direct divs DCLK=%u ret=%d VCLK=%u ret=%d\n",
         final_dclk, dclk_ret, final_vclk, vclk_ret);
 
     uart_write_str("kexec: About to relocate and jump to kernel\n");

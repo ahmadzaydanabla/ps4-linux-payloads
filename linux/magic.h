@@ -420,6 +420,8 @@
 #define kern_off_wlanbt	0x1d1570
 #define kern_off_kern_reboot 0x198060
 #define kern_off_set_gpu_freq 0x4b0b00
+#define kern_off_smc_read_reg 0x61b070
+#define kern_off_smc_write_reg 0x61b190
 #define kern_off_set_pstate 0x4c8ce0
 #define kern_off_update_vddnp 0x4b10a0
 #define kern_off_set_cu_power_gate 0x4b14b0
@@ -639,4 +641,12 @@
 #define kern_off_pstate_before_shutdown 0x3A23D0
 #define kern_off_set_nclk_mem_spd 0x436900
 
+#endif
+
+#ifndef kern_off_smc_read_reg
+#define kern_off_smc_read_reg 0
+#endif
+
+#ifndef kern_off_smc_write_reg
+#define kern_off_smc_write_reg 0
 #endif

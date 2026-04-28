@@ -137,6 +137,8 @@ static int resolve_symbols(void)
     RESOLVE(wlanbt);
     RESOLVE(kern_reboot);
     RESOLVE(set_gpu_freq);
+    RESOLVE_NOERR(smc_read_reg);
+    RESOLVE_NOERR(smc_write_reg);
     RESOLVE(set_pstate);
     RESOLVE(update_vddnp);
     RESOLVE(set_cu_power_gate);
