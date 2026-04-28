@@ -59,10 +59,11 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_CTRL", 0x3D65),
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
+    MmioReg("BIOS_SCRATCH_9", 0x05D2, "kexec final DCLK target MHz"),
     MmioReg("BIOS_SCRATCH_10", 0x05D3, "kexec UVD probe marker"),
-    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec DCLK range 38/50 probe"),
-    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec DCLK range 100/200 probe"),
-    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec DCLK range 400/673 probe"),
+    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec DCLK range 450/500 probe"),
+    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec DCLK range 550/600 probe"),
+    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec DCLK range 625/650 probe"),
     MmioReg("BIOS_SCRATCH_14", 0x05D7, "kexec UVD clock marker"),
     MmioReg("BIOS_SCRATCH_15", 0x05D8, "kexec DCLK/VCLK return codes"),
 ]
@@ -218,9 +219,9 @@ def decode_kexec_probes(mmio_values: dict) -> dict:
         return {}
 
     probe_regs = [
-        ("dclk-38-50", "BIOS_SCRATCH_11"),
-        ("dclk-100-200", "BIOS_SCRATCH_12"),
-        ("dclk-400-673", "BIOS_SCRATCH_13"),
+        ("dclk-450-500", "BIOS_SCRATCH_11"),
+        ("dclk-550-600", "BIOS_SCRATCH_12"),
+        ("dclk-625-650", "BIOS_SCRATCH_13"),
     ]
     probes = []
     for label, name in probe_regs:
@@ -316,6 +317,9 @@ def print_report(result: dict) -> None:
         print("  No marker registers found.")
     else:
         print(f"  marker     = 0x{kexec['marker']:08X} ({'OK' if kexec['marker_ok'] else 'missing/stale'})")
+        final_dclk = mmio.get("BIOS_SCRATCH_9")
+        if final_dclk is not None and kexec["marker_ok"]:
+            print(f"  DCLK target = {final_dclk} MHz")
         print(f"  DCLK ret   = {kexec['dclk_ret']}")
         print(f"  VCLK ret   = {kexec['vclk_ret']}")
         if kexec["marker_ok"] and kexec["dclk_ret"] == 0 and kexec["vclk_ret"] == 0:

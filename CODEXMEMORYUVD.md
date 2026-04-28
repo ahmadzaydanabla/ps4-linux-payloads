@@ -254,6 +254,23 @@ Interpretation:
 - The only known failing Sony domain that matters for UVD decode clock control is still domain 1.
 - The next patch should probe domain 1 across low-to-high DCLK values. If even 38/50 MHz fail, the issue is a DCLK domain state/permission precondition, not just the 673 MHz target.
 
+Latest result from commit `ed7c16e Probe DCLK range for UVD`:
+
+```text
+dclk-38-50   = 38 ret=1, 50 ret=1
+dclk-100-200 = 100 ret=0, 200 ret=0
+dclk-400-673 = 400 ret=0, 673 ret=1
+final         = DCLK 673 ret=1, VCLK 711 ret=0
+post-boot     = CG_DCLK_CNTL DIV 32 (~25 MHz), CG_VCLK_CNTL DIV 19 (~42 MHz)
+```
+
+Interpretation:
+
+- Domain 1 is not globally blocked. It accepts mid-range DCLK values.
+- Sony's DCLK path rejects low `38/50` and high stock `673`, but accepts `100/200/400`.
+- The next patch should find the upper accepted range between `400` and `673`, then finalize with the highest accepted DCLK instead of known-bad `673`.
+- `CG_DCLK_CNTL` moving from DIV 21 to DIV 32 proves domain 1 writes the DCLK control register, but the chosen accepted value can still map to a bad/slow divider.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -347,10 +364,11 @@ Reason:
 - If Sony's DCLK helper rejects because UVD is gated/reset, one of these profiles should let base DCLK return `0`.
 - Direct mediated read/write and write-only attempts returned `-13`, so the direct helper path is no longer the current test.
 - Adjacent Sony domains 2/5 and 3/7 accept but do not change UVD DCLK/VCLK control regs, so they are not the missing direct UVD clock path.
-- Current probe checks whether domain 1 rejects every DCLK target or only high targets:
-  - scratch11: DCLK 38/50 MHz
-  - scratch12: DCLK 100/200 MHz
-  - scratch13: DCLK 400/673 MHz
+- Current probe checks the upper accepted DCLK range:
+  - scratch11: DCLK 450/500 MHz
+  - scratch12: DCLK 550/600 MHz
+  - scratch13: DCLK 625/650 MHz
+  - scratch9: final selected DCLK target
 
 ## Current Theory
 
@@ -381,10 +399,10 @@ sudo python3 read_ps4_gpu_clockss.py
 Primary success line:
 
 ```text
-dclk-38-50 or dclk-100-200 or dclk-400-673 has ret=0
+dclk-450-500, dclk-550-600, or dclk-625-650 has ret=0 and final DCLK target uses the highest accepted value
 ```
 
-If that happens, DCLK domain 1 is frequency/range/table sensitive. If every DCLK target still returns `1`, domain 1 is blocked by a missing state/permission precondition.
+If that happens, DCLK domain 1 is frequency/range/table sensitive, not fully blocked by SAMU. Then compare `CG_DCLK_CNTL` and actual UVD behavior at the selected final target.
 
 ## If DCLK Still Returns 1
 

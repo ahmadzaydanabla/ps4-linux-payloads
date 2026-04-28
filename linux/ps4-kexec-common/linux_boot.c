@@ -127,6 +127,7 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define BIOS_SCRATCH_13 0x5d6
 #define BIOS_SCRATCH_14 0x5d7
 #define BIOS_SCRATCH_15 0x5d8
+#define BIOS_SCRATCH_9 0x5d2
 #define PS4_UVD_PROBE_MAGIC 0x55564450
 #define PS4_UVD_CLOCK_MAGIC 0x55564432
 #define UVD_SOFT_RESET 0x3d3d
@@ -506,47 +507,67 @@ static void cpu_quiesce_gate(void *arg)
     apply_final_gpu_clocks();
 
     /*
-     * Probe domain-1 DCLK across a range. Adjacent Sony domains accept requests
-     * but do not move UVD DCLK/VCLK control regs, so the next question is
-     * whether domain 1 rejects all requests or only the stock high target.
+     * Probe the useful DCLK range. 400 MHz is accepted while 673 MHz fails, so
+     * find the highest accepted target and use it for the final handoff.
      */
-    int ret_a = 1;
-    int ret_b = 1;
+    int ret_450 = 1;
+    int ret_500 = 1;
+    int ret_550 = 1;
+    int ret_600 = 1;
+    int ret_625 = 1;
+    int ret_650 = 1;
+    u32 final_dclk = 400;
+    int final_dclk_ret = 1;
+    int final_vclk_ret = 1;
 
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
 
-    apply_uvd_clock_precondition(0, 0);
-    ret_a = kern.set_gpu_freq(1, 38);
-    ret_b = kern.set_gpu_freq(1, 50);
+    apply_uvd_clock_precondition(0x0000018c, 0);
+    ret_450 = kern.set_gpu_freq(1, 450);
+    ret_500 = kern.set_gpu_freq(1, 500);
     write_gpu_reg(BIOS_SCRATCH_11,
-        encode_uvd_probe(38, 50, ret_a, ret_b));
-    kern.printf("kexec: UVD DCLK range d1=38 ret=%d d1=50 ret=%d\n",
-        ret_a, ret_b);
+        encode_uvd_probe(450, 500, ret_450, ret_500));
+    kern.printf("kexec: UVD DCLK range d1=450 ret=%d d1=500 ret=%d\n",
+        ret_450, ret_500);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    ret_a = kern.set_gpu_freq(1, 100);
-    ret_b = kern.set_gpu_freq(1, 200);
+    ret_550 = kern.set_gpu_freq(1, 550);
+    ret_600 = kern.set_gpu_freq(1, 600);
     write_gpu_reg(BIOS_SCRATCH_12,
-        encode_uvd_probe(100, 200, ret_a, ret_b));
-    kern.printf("kexec: UVD DCLK range d1=100 ret=%d d1=200 ret=%d\n",
-        ret_a, ret_b);
+        encode_uvd_probe(550, 600, ret_550, ret_600));
+    kern.printf("kexec: UVD DCLK range d1=550 ret=%d d1=600 ret=%d\n",
+        ret_550, ret_600);
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    ret_a = kern.set_gpu_freq(1, 400);
-    ret_b = kern.set_gpu_freq(1, 673);
+    ret_625 = kern.set_gpu_freq(1, 625);
+    ret_650 = kern.set_gpu_freq(1, 650);
     write_gpu_reg(BIOS_SCRATCH_13,
-        encode_uvd_probe(400, 673, ret_a, ret_b));
-    kern.printf("kexec: UVD DCLK range d1=400 ret=%d d1=673 ret=%d\n",
-        ret_a, ret_b);
+        encode_uvd_probe(625, 650, ret_625, ret_650));
+    kern.printf("kexec: UVD DCLK range d1=625 ret=%d d1=650 ret=%d\n",
+        ret_625, ret_650);
+
+    if (ret_650 == 0)
+        final_dclk = 650;
+    else if (ret_625 == 0)
+        final_dclk = 625;
+    else if (ret_600 == 0)
+        final_dclk = 600;
+    else if (ret_550 == 0)
+        final_dclk = 550;
+    else if (ret_500 == 0)
+        final_dclk = 500;
+    else if (ret_450 == 0)
+        final_dclk = 450;
 
     apply_uvd_clock_precondition(0x0000018c, 0);
-    ret_b = kern.set_gpu_freq(6, 711);
-    ret_a = kern.set_gpu_freq(1, 673);
+    final_vclk_ret = kern.set_gpu_freq(6, 711);
+    final_dclk_ret = kern.set_gpu_freq(1, final_dclk);
+    write_gpu_reg(BIOS_SCRATCH_9, final_dclk);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);
     write_gpu_reg(BIOS_SCRATCH_15,
-        ((u32)ret_a & 0xffff) << 16 | ((u32)ret_b & 0xffff));
-    kern.printf("kexec: final UVD set_gpu_freq DCLK=673 ret=%d VCLK=711 ret=%d\n",
-        ret_a, ret_b);
+        ((u32)final_dclk_ret & 0xffff) << 16 | ((u32)final_vclk_ret & 0xffff));
+    kern.printf("kexec: final UVD set_gpu_freq DCLK=%u ret=%d VCLK=711 ret=%d\n",
+        final_dclk, final_dclk_ret, final_vclk_ret);
 
     uart_write_str("kexec: About to relocate and jump to kernel\n");
 
