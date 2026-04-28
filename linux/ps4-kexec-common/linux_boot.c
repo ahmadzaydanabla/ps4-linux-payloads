@@ -129,6 +129,9 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define BIOS_SCRATCH_15 0x5d8
 #define PS4_UVD_PROBE_MAGIC 0x55564450
 #define PS4_UVD_CLOCK_MAGIC 0x55564432
+#define UVD_SOFT_RESET 0x3d3d
+#define UVD_CGC_CTRL 0x3d2c
+#define UVD_CGC_GATE 0x3d2d
 
 static void write_gpu_reg(u32 reg, u32 value)
 {
@@ -173,6 +176,18 @@ static void apply_final_gpu_clocks(void)
     kern.set_gpu_freq(3, 800);
     kern.set_gpu_freq(7, 673);
     kern.update_vddnp(0x12);
+}
+
+static void apply_uvd_clock_precondition(u32 cgc_ctrl, u32 cgc_gate)
+{
+    /*
+     * Sony's DCLK helper rejects even base DCLK when Linux sees UVD in the
+     * broken stop() state. Try known-writable gate/reset profiles before
+     * asking Sony's clock path for DCLK.
+     */
+    write_gpu_reg(UVD_CGC_GATE, cgc_gate);
+    write_gpu_reg(UVD_CGC_CTRL, cgc_ctrl);
+    write_gpu_reg(UVD_SOFT_RESET, 0);
 }
 
 static void configure_vram(void)
@@ -491,9 +506,8 @@ static void cpu_quiesce_gate(void *arg)
     apply_final_gpu_clocks();
 
     /*
-     * The GPU reset above can undo earlier kexec clock requests. Probe Sony's
-     * own clock path after the reset. Since VCLK=711 is accepted while DCLK=673
-     * is rejected, explicitly test whether DCLK only works after VCLK is set.
+     * Probe DCLK after UVD gate/reset precondition profiles from the known
+     * Liverpool notes. Always request VCLK first since base VCLK is accepted.
      */
     int dclk_ret = 1;
     int vclk_ret = 1;
@@ -502,31 +516,35 @@ static void cpu_quiesce_gate(void *arg)
 
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
 
-    dclk_ret = kern.set_gpu_freq(1, 673);
+    apply_uvd_clock_precondition(0, 0);
     vclk_ret = kern.set_gpu_freq(6, 711);
+    dclk_ret = kern.set_gpu_freq(1, 673);
     write_gpu_reg(BIOS_SCRATCH_11,
         encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD d-first base DCLK=673 ret=%d VCLK=711 ret=%d\n",
-        dclk_ret, vclk_ret);
+    kern.printf("kexec: UVD cgc0 base VCLK=711 ret=%d DCLK=673 ret=%d\n",
+        vclk_ret, dclk_ret);
 
+    apply_uvd_clock_precondition(0x1fff018d, 0x000fffff);
     vclk_ret = kern.set_gpu_freq(6, 711);
     dclk_ret = kern.set_gpu_freq(1, 673);
     write_gpu_reg(BIOS_SCRATCH_12,
         encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD v-first base VCLK=711 ret=%d DCLK=673 ret=%d\n",
+    kern.printf("kexec: UVD sony-gate base VCLK=711 ret=%d DCLK=673 ret=%d\n",
         vclk_ret, dclk_ret);
 
-    vclk_ret = kern.set_gpu_freq(6, 984);
-    dclk_ret = kern.set_gpu_freq(1, 853);
+    apply_uvd_clock_precondition(0x0000018c, 0);
+    vclk_ret = kern.set_gpu_freq(6, 711);
+    dclk_ret = kern.set_gpu_freq(1, 673);
     write_gpu_reg(BIOS_SCRATCH_13,
-        encode_uvd_probe(853, 984, dclk_ret, vclk_ret));
-    kern.printf("kexec: UVD v-first high VCLK=984 ret=%d DCLK=853 ret=%d\n",
+        encode_uvd_probe(673, 711, dclk_ret, vclk_ret));
+    kern.printf("kexec: UVD cgc18c base VCLK=711 ret=%d DCLK=673 ret=%d\n",
         vclk_ret, dclk_ret);
     if (dclk_ret == 0 && vclk_ret == 0) {
-        final_dclk = 853;
-        final_vclk = 984;
+        final_dclk = 673;
+        final_vclk = 711;
     }
 
+    apply_uvd_clock_precondition(0x0000018c, 0);
     vclk_ret = kern.set_gpu_freq(6, final_vclk);
     dclk_ret = kern.set_gpu_freq(1, final_dclk);
     write_gpu_reg(BIOS_SCRATCH_14, PS4_UVD_CLOCK_MAGIC);

@@ -60,9 +60,9 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
     MmioReg("BIOS_SCRATCH_10", 0x05D3, "kexec UVD probe marker"),
-    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec UVD d-first base probe"),
-    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec UVD v-first base probe"),
-    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec UVD v-first high probe"),
+    MmioReg("BIOS_SCRATCH_11", 0x05D4, "kexec UVD CGC=0 base probe"),
+    MmioReg("BIOS_SCRATCH_12", 0x05D5, "kexec UVD Sony-gate base probe"),
+    MmioReg("BIOS_SCRATCH_13", 0x05D6, "kexec UVD CGC=0x18c base probe"),
     MmioReg("BIOS_SCRATCH_14", 0x05D7, "kexec UVD clock marker"),
     MmioReg("BIOS_SCRATCH_15", 0x05D8, "kexec DCLK/VCLK return codes"),
 ]
@@ -218,9 +218,9 @@ def decode_kexec_probes(mmio_values: dict) -> dict:
         return {}
 
     probe_regs = [
-        ("d-first-base", "BIOS_SCRATCH_11"),
-        ("v-first-base", "BIOS_SCRATCH_12"),
-        ("v-first-high", "BIOS_SCRATCH_13"),
+        ("cgc0-base", "BIOS_SCRATCH_11"),
+        ("sony-gate", "BIOS_SCRATCH_12"),
+        ("cgc18c-base", "BIOS_SCRATCH_13"),
     ]
     probes = []
     for label, name in probe_regs:
@@ -295,7 +295,7 @@ def print_report(result: dict) -> None:
             for probe in probes["probes"]:
                 verdict = "accepted" if probe["accepted"] else "rejected"
                 print(
-                    f"  {probe['label']:<12} = DCLK={probe['dclk']:>3} ret={probe['dclk_ret']:>2} "
+                    f"  {probe['label']:<11} = DCLK={probe['dclk']:>3} ret={probe['dclk_ret']:>2} "
                     f"VCLK={probe['vclk']:>3} ret={probe['vclk_ret']:>2} -> {verdict} "
                     f"(raw=0x{probe['raw']:08X})"
                 )

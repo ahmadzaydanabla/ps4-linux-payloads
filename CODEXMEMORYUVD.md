@@ -172,6 +172,11 @@ Interpretation:
 - VCLK base `711` can be accepted.
 - DCLK base `673` is rejected.
 - Replaying the full GPU clock ladder after the late GPU reset did not change the result.
+- VCLK-first ordering also did not change the result:
+  - `d-first-base = DCLK=673 ret=1 VCLK=711 ret=0`
+  - `v-first-base = DCLK=673 ret=1 VCLK=711 ret=0`
+  - `v-first-high = DCLK=853 ret=1 VCLK=984 ret=1`
+  - final VCLK returned `0`, final DCLK still returned `1`.
 - Therefore the current blocker is DCLK-specific, not “all UVD clocks are impossible.”
 
 ## Tried So Far
@@ -184,6 +189,7 @@ Interpretation:
   - `0xC05000AC` is `CG_ECLK_CNTL`.
 - Probed base/mid/high DCLK/VCLK pairs.
 - Replayed the full Sony-style GPU pstate/frequency/CU-gate/VDDNP ladder after reset with commit `63f2af3`.
+- Tested DCLK-first vs VCLK-first ordering with commit `cc4cb4e`.
 
 Result:
 
@@ -220,11 +226,11 @@ Result:
   - `VCLK=711 ret=0`
   - DCLK/VCLK control regs stayed around 40 MHz.
 
-## Current Patch Under Test
+## Previous Patch Tested
 
-Commit being prepared after the unchanged `63f2af3` result:
+Commit tested after the unchanged `63f2af3` result:
 
-- Probe order dependency explicitly.
+- `cc4cb4e Probe UVD clock order dependency`
 
 Change:
 
@@ -238,6 +244,32 @@ Reason:
 - The only accepted UVD-related request observed so far is `VCLK=711`.
 - The old probe never retried `DCLK=673` after the accepted base VCLK state.
 - If DCLK depends on VCLK being accepted first, `v-first-base` should flip DCLK from `ret=1` to `ret=0`.
+
+Result:
+
+- Ordering was not the missing precondition.
+- `v-first-base` still produced `DCLK=673 ret=1 VCLK=711 ret=0`.
+
+## Current Patch Under Test
+
+Commit being prepared after the unchanged order test:
+
+- Probe UVD gate/reset preconditions before asking Sony's DCLK helper.
+
+Change:
+
+- `BIOS_SCRATCH_11`: `cgc0-base`, apply `UVD_CGC_GATE=0`, `UVD_CGC_CTRL=0`, `UVD_SOFT_RESET=0`, then VCLK-first base clocks.
+- `BIOS_SCRATCH_12`: `sony-gate`, apply `UVD_CGC_GATE=0x000fffff`, `UVD_CGC_CTRL=0x1fff018d`, `UVD_SOFT_RESET=0`, then VCLK-first base clocks.
+- `BIOS_SCRATCH_13`: `cgc18c-base`, apply `UVD_CGC_GATE=0`, `UVD_CGC_CTRL=0x0000018c`, `UVD_SOFT_RESET=0`, then VCLK-first base clocks.
+- Final reapply uses the `cgc18c-base` precondition and VCLK-first base clocks.
+
+Reason:
+
+- User notes show UVD regs are writable and kernel stop/init leaves a broken state:
+  - broken: `UVD_SOFT_RESET` nonzero, `UVD_CGC_CTRL=0x7ffff905`
+  - no-UVD-IP working-ish state: `UVD_STATUS=0x3`, `UVD_SOFT_RESET=0`, `UVD_CGC_CTRL=0x1fff018d`
+- Notes also say `CGC_CTRL=0`, `CGC_CTRL=0x18c`, and `CGC_GATE=0` read back correctly.
+- If Sony's DCLK helper rejects because UVD is gated/reset, one of these profiles should let base DCLK return `0`.
 
 ## Current Theory
 
@@ -259,7 +291,7 @@ Less likely:
 
 ## Next Test
 
-After the order-probe commit builds and boots, run:
+After the gate/reset precondition commit builds and boots, run:
 
 ```bash
 sudo python3 read_ps4_gpu_clockss.py
@@ -268,10 +300,10 @@ sudo python3 read_ps4_gpu_clockss.py
 Primary success line:
 
 ```text
-v-first-base = DCLK=673 ret=0 VCLK=711 ret=0
+cgc0-base or cgc18c-base = DCLK=673 ret=0 VCLK=711 ret=0
 ```
 
-If that happens, VCLK-first ordering fixed the DCLK precondition and the next job is to confirm actual `CG_DCLK_CNTL`/`CG_VCLK_CNTL` values changed from the ~40 MHz dividers.
+If that happens, UVD gate/reset state was the DCLK precondition and the next job is to confirm actual `CG_DCLK_CNTL`/`CG_VCLK_CNTL` values changed from the ~40 MHz dividers.
 
 ## If DCLK Still Returns 1
 
