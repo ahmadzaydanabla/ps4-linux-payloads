@@ -304,6 +304,19 @@ Interpretation:
 - Sony's accepted clock request updates the status/current divider path, but leaves the control selector at the old low divider.
 - Next patch should try a raw SMC indirect write after Sony returns success: preserve the upper control bits and copy the low 7-bit divider from STATUS into CNTL for DCLK and VCLK.
 
+Latest result from commit `1739b20 Sync UVD clock controls to status`:
+
+```text
+final        = DCLK target 625, DCLK ret=0, VCLK ret=0
+kexec DCLK  = CNTL DIV 21, STATUS DIV 3
+kexec VCLK  = CNTL DIV 19, STATUS DIV 1
+```
+
+Interpretation:
+
+- Raw SMC indirect writes via `SMC_IND_DATA_0` did not update DCLK/VCLK control regs.
+- Next patch should try Sony's mediated `smc_write_reg` helper again, but only after `set_gpu_freq` has accepted the clock, and log the DCLK/VCLK sync return codes in scratch2.
+
 ## Tried So Far
 
 - Captured return codes from `kern.set_gpu_freq` by changing its type to return `int`.
@@ -401,6 +414,7 @@ Reason:
   - scratch11: DCLK 450/500 MHz
   - scratch12: DCLK 550/600 MHz
   - scratch13: DCLK 625/650 MHz
+  - scratch2: DCLK/VCLK post-success mediated sync return codes
   - scratch4-8: final kexec-side clock/control snapshots after status-to-control sync
   - scratch9: final selected DCLK target
 

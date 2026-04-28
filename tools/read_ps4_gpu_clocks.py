@@ -59,6 +59,7 @@ MMIO_REGS = [
     MmioReg("UVD_LMI_CTRL", 0x3D65),
     MmioReg("UVD_LMI_STATUS", 0x3D66),
     MmioReg("UVD_VCPU_CNTL", 0x3D4A),
+    MmioReg("BIOS_SCRATCH_2", 0x05CB, "kexec DCLK/VCLK sync return codes"),
     MmioReg("BIOS_SCRATCH_4", 0x05CD, "kexec final CG_DCLK_CNTL snapshot"),
     MmioReg("BIOS_SCRATCH_5", 0x05CE, "kexec final CG_DCLK_STATUS snapshot"),
     MmioReg("BIOS_SCRATCH_6", 0x05CF, "kexec final CG_VCLK_CNTL snapshot"),
@@ -200,11 +201,14 @@ def decode_kexec_scratch(mmio_values: dict) -> dict:
     packed = mmio_values.get("BIOS_SCRATCH_15")
     if marker is None or packed is None:
         return {}
+    sync_packed = mmio_values.get("BIOS_SCRATCH_2", 0)
     return {
         "marker": marker,
         "marker_ok": marker == PS4_UVD_CLOCK_MAGIC,
         "dclk_ret": signed16(packed >> 16),
         "vclk_ret": signed16(packed),
+        "dclk_sync_ret": signed16(sync_packed >> 16),
+        "vclk_sync_ret": signed16(sync_packed),
     }
 
 
@@ -327,6 +331,8 @@ def print_report(result: dict) -> None:
             print(f"  DCLK target = {final_dclk} MHz")
         print(f"  DCLK ret   = {kexec['dclk_ret']}")
         print(f"  VCLK ret   = {kexec['vclk_ret']}")
+        print(f"  DCLK sync  = {kexec['dclk_sync_ret']}")
+        print(f"  VCLK sync  = {kexec['vclk_sync_ret']}")
         if kexec["marker_ok"] and kexec["dclk_ret"] == 0 and kexec["vclk_ret"] == 0:
             print("  result     = Sony accepted both final clock requests.")
         elif kexec["marker_ok"]:

@@ -128,6 +128,7 @@ void prepare_boot_params(struct boot_params *bp, u8 *linux_image)
 #define BIOS_SCRATCH_13 0x5d6
 #define BIOS_SCRATCH_14 0x5d7
 #define BIOS_SCRATCH_15 0x5d8
+#define BIOS_SCRATCH_2 0x5cb
 #define BIOS_SCRATCH_4 0x5cd
 #define BIOS_SCRATCH_5 0x5ce
 #define BIOS_SCRATCH_6 0x5cf
@@ -162,20 +163,18 @@ static u32 read_smc_indirect(u32 reg)
     return read_gpu_reg(SMC_IND_DATA_0);
 }
 
-static void write_smc_indirect(u32 reg, u32 value)
-{
-    write_gpu_reg(SMC_IND_INDEX_0, reg);
-    write_gpu_reg(SMC_IND_DATA_0, value);
-}
-
-static void sync_clock_control_to_status(u32 control_reg, u32 status_reg)
+static int sync_clock_control_to_status(u32 control_reg, u32 status_reg)
 {
     u32 control = read_smc_indirect(control_reg);
     u32 status = read_smc_indirect(status_reg);
     u32 status_divider = status & 0x7f;
 
-    if (status_divider)
-        write_smc_indirect(control_reg, (control & ~0x7f) | status_divider);
+    if (!status_divider)
+        return -1;
+    if (!kern.smc_write_reg)
+        return -2;
+
+    return kern.smc_write_reg(control_reg, (control & ~0x7f) | status_divider);
 }
 
 static u32 encode_uvd_probe(u32 dclk, u32 vclk, int dclk_ret, int vclk_ret)
@@ -558,6 +557,8 @@ static void cpu_quiesce_gate(void *arg)
     u32 final_dclk = 400;
     int final_dclk_ret = 1;
     int final_vclk_ret = 1;
+    int dclk_sync_ret = 1;
+    int vclk_sync_ret = 1;
 
     write_gpu_reg(BIOS_SCRATCH_10, PS4_UVD_PROBE_MAGIC);
 
@@ -602,9 +603,11 @@ static void cpu_quiesce_gate(void *arg)
     final_vclk_ret = kern.set_gpu_freq(6, 711);
     final_dclk_ret = kern.set_gpu_freq(1, final_dclk);
     if (final_dclk_ret == 0)
-        sync_clock_control_to_status(CG_DCLK_CNTL, CG_DCLK_STATUS);
+        dclk_sync_ret = sync_clock_control_to_status(CG_DCLK_CNTL, CG_DCLK_STATUS);
     if (final_vclk_ret == 0)
-        sync_clock_control_to_status(CG_VCLK_CNTL, CG_VCLK_STATUS);
+        vclk_sync_ret = sync_clock_control_to_status(CG_VCLK_CNTL, CG_VCLK_STATUS);
+    write_gpu_reg(BIOS_SCRATCH_2,
+        ((u32)dclk_sync_ret & 0xffff) << 16 | ((u32)vclk_sync_ret & 0xffff));
     write_gpu_reg(BIOS_SCRATCH_4, read_smc_indirect(CG_DCLK_CNTL));
     write_gpu_reg(BIOS_SCRATCH_5, read_smc_indirect(CG_DCLK_STATUS));
     write_gpu_reg(BIOS_SCRATCH_6, read_smc_indirect(CG_VCLK_CNTL));
